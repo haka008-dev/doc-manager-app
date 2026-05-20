@@ -6,7 +6,9 @@
 """
 from __future__ import annotations
 
+import hmac
 import os
+import time
 from pathlib import Path
 
 import streamlit as st
@@ -38,24 +40,70 @@ def _secret(key: str, default: str = "") -> str:
     return os.environ.get(key, default)
 
 
-# ---------------- 비밀번호 게이트 ----------------
+# ---------------- 비밀번호 게이트 (무차별 대입 차단 포함) ----------------
+MAX_ATTEMPTS = 5          # 누적 실패 허용 횟수
+LOCKOUT_SECONDS = 300     # 잠금 시간 (5분)
+
+
+@st.cache_resource
+def _auth_state() -> dict:
+    """모든 세션이 공유하는 인증 상태. 무차별 대입 방어용 전역 카운터.
+
+    st.cache_resource는 앱 프로세스 전체에서 단 하나만 존재하므로,
+    공격자가 새 탭/세션을 열어도 이 카운터는 우회되지 않습니다.
+    """
+    return {"fail_count": 0, "locked_until": 0.0}
+
+
 def require_password() -> None:
-    """APP_PASSWORD가 설정되어 있으면 비밀번호 입력을 요구. 미설정이면 통과."""
+    """APP_PASSWORD가 설정되어 있으면 비밀번호 입력을 요구. 미설정이면 통과.
+
+    보안:
+      - hmac.compare_digest 로 상수 시간 비교 (timing attack 방어)
+      - 누적 MAX_ATTEMPTS회 실패 시 LOCKOUT_SECONDS 동안 전역 잠금
+    """
     expected = _secret("APP_PASSWORD")
     if not expected:
         return
     if st.session_state.get("authed"):
         return
 
+    state = _auth_state()
+    now = time.time()
+
     st.title("🔒 챗봇 문서 관리기")
+
+    # 잠금 상태면 입력 자체를 막음
+    remaining = state["locked_until"] - now
+    if remaining > 0:
+        mins = int(remaining // 60) + 1
+        st.error(
+            f"비밀번호를 여러 번 틀려 로그인이 잠겼습니다. "
+            f"약 {mins}분 후 다시 시도하세요."
+        )
+        st.stop()
+
     st.caption("비밀번호를 입력하세요.")
     pw = st.text_input("비밀번호", type="password", label_visibility="collapsed")
     if st.button("로그인", type="primary"):
-        if pw == expected:
+        if not pw:
+            st.warning("비밀번호를 입력하세요.")
+        elif hmac.compare_digest(pw.encode("utf-8"), expected.encode("utf-8")):
+            state["fail_count"] = 0
             st.session_state["authed"] = True
             st.rerun()
         else:
-            st.error("비밀번호가 일치하지 않습니다.")
+            state["fail_count"] += 1
+            left = MAX_ATTEMPTS - state["fail_count"]
+            if left <= 0:
+                state["locked_until"] = now + LOCKOUT_SECONDS
+                state["fail_count"] = 0
+                st.error(
+                    f"비밀번호를 {MAX_ATTEMPTS}회 틀렸습니다. "
+                    f"{LOCKOUT_SECONDS // 60}분간 로그인이 잠깁니다."
+                )
+            else:
+                st.error(f"비밀번호가 일치하지 않습니다. (남은 시도: {left}회)")
     st.stop()
 
 
