@@ -130,6 +130,14 @@ def require_password() -> None:
 
 
 # ---------------- 백엔드 선택 ----------------
+@st.cache_resource(show_spinner=False)
+def _get_github_backend(token: str, repo: str, branch: str, prefix: str) -> GitHubBackend:
+    """GitHub 백엔드를 한 번만 생성해 재사용 — 매 rerun마다 저장소를
+    다시 조회하지 않도록 캐싱 (앱 속도 개선의 핵심)."""
+    return GitHubBackend(token=token, repo_full_name=repo,
+                         branch=branch, docs_prefix=prefix)
+
+
 def build_backend() -> tuple[Backend, str]:
     """반환: (backend, 표시용 라벨)"""
     gh_token = _secret("GITHUB_TOKEN")
@@ -138,12 +146,7 @@ def build_backend() -> tuple[Backend, str]:
     gh_prefix = _secret("GITHUB_DOCS_PREFIX", "")
 
     if gh_token and gh_repo:
-        backend = GitHubBackend(
-            token=gh_token,
-            repo_full_name=gh_repo,
-            branch=gh_branch,
-            docs_prefix=gh_prefix,
-        )
+        backend = _get_github_backend(gh_token, gh_repo, gh_branch, gh_prefix)
         label = f"🐙 GitHub · {gh_repo}@{gh_branch}"
         if gh_prefix:
             label += f"/{gh_prefix}"
