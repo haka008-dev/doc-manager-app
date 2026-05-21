@@ -279,6 +279,49 @@ def _save_change(
     }
 
 
+def _render_store_add(backend, relative, original, regions, api_key):
+    """운영 문서 매장 추가 탭 — 시·구 선택 + 양식 입력 + 삽입."""
+    st.caption("시·구를 고르고 매장 정보를 입력하면 해당 구역 끝에 양식대로 추가됩니다.")
+
+    cities = list(regions.keys())
+    col1, col2 = st.columns(2)
+    with col1:
+        city = st.selectbox("시 / 도", cities, key=f"stcity::{relative}")
+    gus = regions.get(city, [])
+    with col2:
+        gu_idx = st.selectbox(
+            "구 / 시 / 군",
+            range(len(gus)),
+            format_func=lambda i: gus[i][0],
+            key=f"stgu::{relative}::{city}",
+        )
+    gu_name, gu_line = gus[gu_idx]
+    st.markdown(f"**추가 위치:** {gu_name}")
+
+    name = st.text_input("매장명", placeholder="예: 하카 OO직영점", key=f"stname::{relative}")
+    addr = st.text_input("주소지", key=f"staddr::{relative}")
+    phone = st.text_input("연락처", placeholder="예: 051-000-0000", key=f"stphone::{relative}")
+    hours = st.text_input("운영시간", value="11:00 ~ 21:00", key=f"sthours::{relative}")
+    note = st.text_input("특이사항 (선택)", key=f"stnote::{relative}")
+
+    if st.button("🏪 이 구역에 매장 추가", type="primary", key=f"staddbtn::{relative}"):
+        if not (name.strip() and addr.strip() and phone.strip() and hours.strip()):
+            st.error("매장명·주소지·연락처·운영시간은 필수 입력입니다.")
+        else:
+            new_full = files.add_store_to_region(
+                original, gu_line, name.strip(), addr.strip(),
+                phone.strip(), hours.strip(), note,
+            )
+            result = _save_change(
+                backend, relative, original, new_full,
+                f"매장 추가: {name.strip()} ({gu_name})", False, api_key,
+            )
+            e = result["entry"]
+            st.success(f"'{name.strip()}' 추가 완료 · +{e['added']} / -{e['removed']} 줄")
+            st.session_state.pop(f"buf::{relative}", None)
+            st.rerun()
+
+
 def render_editor(backend: Backend, backend_key: str, relative: str, api_key: str):
     # 다운로드 파일명에 당일 날짜를 붙임 (예: 제품정보-merged_260521.md)
     file_name = f"{Path(relative).stem}_{time.strftime('%y%m%d')}.md"
@@ -297,9 +340,13 @@ def render_editor(backend: Backend, backend_key: str, relative: str, api_key: st
             key=f"download::{relative}",
         )
 
-    tab_whole, tab_parts, tab_preview, tab_outline = st.tabs(
-        ["✏️ 통합 편집", "🧩 파트별 편집", "👀 미리보기", "🗂 목차"]
-    )
+    regions = files.parse_store_regions(original)
+    _tab_names = ["✏️ 통합 편집", "🧩 파트별 편집", "👀 미리보기", "🗂 목차"]
+    if regions:
+        _tab_names.append("🏪 매장 추가")
+    _tabs = st.tabs(_tab_names)
+    tab_whole, tab_parts, tab_preview, tab_outline = _tabs[:4]
+    tab_store = _tabs[4] if regions else None
 
     # ---- 통합 편집 ----
     with tab_whole:
@@ -481,6 +528,10 @@ def render_editor(backend: Backend, backend_key: str, relative: str, api_key: st
         else:
             for lvl, text in headings:
                 st.markdown(f"{'  ' * (lvl - 1)}- {'#' * lvl} {text}")
+
+    if tab_store is not None:
+        with tab_store:
+            _render_store_add(backend, relative, original, regions, api_key)
 
 
 # ---------------- 변경 로그 ----------------

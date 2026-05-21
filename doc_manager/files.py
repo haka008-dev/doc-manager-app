@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 
@@ -84,3 +85,84 @@ def extract_headings(content: str) -> list[tuple[int, str]]:
             if 1 <= level <= 6 and len(stripped) > level and stripped[level] == " ":
                 headings.append((level, stripped[level + 1 :].strip()))
     return headings
+
+
+# ---------- 운영 문서 매장 구역 ----------
+_HEADER = re.compile(r"^(#{1,6}) ")
+_STORE_NUM = re.compile(r"^(\d+)\. ")
+
+
+def parse_store_regions(content: str) -> dict[str, list[tuple[str, int]]]:
+    """운영 문서의 '시 → [(구, 헤더 줄번호)]' 구조를 파싱.
+
+    ### 'XX 지역 매장 정보' = 시, ##### 'XX구/시/군' = 구.
+    매장이 들어갈 수 있는 구역만 추출. 매장 구조가 없으면 빈 dict.
+    """
+    lines = content.split("\n")
+    regions: dict[str, list[tuple[str, int]]] = {}
+    cur_city: str | None = None
+    for i, line in enumerate(lines):
+        m = _HEADER.match(line)
+        if not m:
+            continue
+        level = len(m.group(1))
+        title = line[m.end():].strip()
+        if level <= 2:
+            cur_city = None
+        elif level == 3:
+            if "지역 매장 정보" in title:
+                cur_city = title.replace("지역 매장 정보", "").strip()
+                regions.setdefault(cur_city, [])
+            else:
+                cur_city = None
+        elif level == 5 and cur_city is not None:
+            if title.endswith(("구", "시", "군")):
+                regions[cur_city].append((title, i))
+    return {c: g for c, g in regions.items() if g}
+
+
+def add_store_to_region(
+    content: str,
+    gu_line_index: int,
+    name: str,
+    address: str,
+    phone: str,
+    hours: str,
+    note: str = "",
+) -> str:
+    """gu_line_index의 ##### 구역 맨 끝에 매장 블록을 양식대로 삽입."""
+    lines = content.split("\n")
+
+    # 구역 범위: 구 헤더 다음 ~ 다음 헤더 직전
+    end = len(lines)
+    for j in range(gu_line_index + 1, len(lines)):
+        if _HEADER.match(lines[j]):
+            end = j
+            break
+
+    # 구역 내 매장 최대 번호
+    max_n = 0
+    for j in range(gu_line_index + 1, end):
+        sm = _STORE_NUM.match(lines[j])
+        if sm:
+            max_n = max(max_n, int(sm.group(1)))
+    new_n = max_n + 1
+
+    # 새 매장 블록 (양식: 항목마다 빈 줄)
+    block = [
+        f"{new_n}. {name}", "",
+        f"   - 주소지: {address}", "",
+        f"   - 연락처: {phone}", "",
+        f"   - 운영시간: {hours}",
+    ]
+    if note.strip():
+        block += ["", f"   - 특이사항: {note.strip()}"]
+    block.append("")
+
+    # 삽입 위치: 구역 끝 빈 줄들 앞 (마지막 내용 줄 다음)
+    insert_at = end
+    while insert_at > gu_line_index + 1 and lines[insert_at - 1].strip() == "":
+        insert_at -= 1
+
+    new_lines = lines[:insert_at] + ["", *block] + lines[insert_at:]
+    return "\n".join(new_lines)
