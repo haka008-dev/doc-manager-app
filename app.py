@@ -28,6 +28,20 @@ st.set_page_config(
     layout="wide",
 )
 
+# 버튼을 살짝 컴팩트하게 — 목차 항목이 두 줄로 늘어나지 않도록
+st.markdown(
+    """
+    <style>
+    .stButton button { padding: 0.22rem 0.55rem; line-height: 1.3; min-height: 0; }
+    .stButton button p {
+        font-size: 0.85rem; margin: 0;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 
 # ---------------- secret/환경 변수 헬퍼 ----------------
 def _secret(key: str, default: str = "") -> str:
@@ -369,9 +383,14 @@ def render_editor(backend: Backend, backend_key: str, relative: str, api_key: st
                     for si, sub in matched:
                         shown += 1
                         is_sel = current == (hi, si)
+                        disp = (
+                            sub.title if len(sub.title) <= 24
+                            else sub.title[:23] + "…"
+                        )
                         if st.button(
-                            sub.title,
+                            disp,
                             key=f"tocbtn::{relative}::{hi}::{si}",
+                            help=sub.title,
                             use_container_width=True,
                             type="primary" if is_sel else "secondary",
                         ):
@@ -577,7 +596,7 @@ def main():
     st.title("📚 챗봇 문서 관리기")
     st.caption(backend_label)
 
-    col_files, col_main, col_log = st.columns([2, 5, 3], gap="medium")
+    col_files, col_main, col_log = st.columns([2, 6, 2], gap="medium")
 
     with col_files:
         st.subheader("📁 문서")
