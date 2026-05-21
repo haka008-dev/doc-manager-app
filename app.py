@@ -364,7 +364,7 @@ def render_editor(backend: Backend, backend_key: str, relative: str, api_key: st
         new_text = st.text_area(
             "내용",
             value=st.session_state[buf_key],
-            height=520,
+            height=720,
             key=f"editor::{relative}",
             label_visibility="collapsed",
         )
@@ -478,7 +478,7 @@ def render_editor(backend: Backend, backend_key: str, relative: str, api_key: st
                         edited = st.text_area(
                             "내용",
                             value=sub.full_text,
-                            height=420,
+                            height=620,
                             key=wkey,
                             label_visibility="collapsed",
                         )
