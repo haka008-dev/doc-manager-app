@@ -32,11 +32,16 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-    .stButton button { padding: 0.22rem 0.55rem; line-height: 1.3; min-height: 0; }
+    /* 버튼(목차 항목 등) 컴팩트하게 */
+    .stButton button { padding: 0.16rem 0.5rem; line-height: 1.25; min-height: 0; }
     .stButton button p {
-        font-size: 0.85rem; margin: 0;
+        font-size: 0.78rem; margin: 0;
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
+    /* 버전 히스토리 expander 박스·글자 축소 */
+    [data-testid="stExpander"] summary { padding: 0.28rem 0.55rem; font-size: 0.8rem; }
+    [data-testid="stExpander"] summary p { font-size: 0.8rem; }
+    [data-testid="stExpander"] summary svg { width: 0.9rem; height: 0.9rem; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -426,7 +431,11 @@ def render_editor(backend: Backend, backend_key: str, relative: str, api_key: st
                     ]
                     if not matched:
                         continue
-                    st.markdown(f"**{h2.title}**")
+                    st.markdown(
+                        f"<div style='font-size:0.8rem;font-weight:700;"
+                        f"margin:0.45rem 0 0.05rem'>{h2.title}</div>",
+                        unsafe_allow_html=True,
+                    )
                     for si, sub in matched:
                         shown += 1
                         is_sel = current == (hi, si)
