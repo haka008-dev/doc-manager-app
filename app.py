@@ -334,75 +334,75 @@ def render_editor(backend: Backend, backend_key: str, relative: str, api_key: st
 
     # ---- 파트별 편집 ----
     with tab_parts:
-        col_lvl, col_ai = st.columns([3, 2])
-        with col_lvl:
-            level = st.radio(
-                "분할 기준 헤더 레벨",
-                options=[1, 2, 3],
-                format_func=lambda x: f"H{x} ({'#' * x})",
-                horizontal=True,
-                index=1,
-                key=f"split_level::{relative}",
-            )
-        with col_ai:
-            use_ai_summary_part = st.checkbox(
-                "AI 변경 요약 생성", value=False, key=f"ai_sum_part::{relative}",
-            )
+        st.caption("대분류(##)를 고르면, 그 안의 항목(###)을 하나씩 펼쳐서 따로 편집할 수 있어요.")
+        h2_sections = files.split_sections(original, level=2)
 
-        sections = files.split_sections(original, level=level)
-        st.caption(f"총 {len(sections)}개 파트")
-
-        if len(sections) == 1 and sections[0].title == "(전체)":
-            st.info(
-                f"H{level} 헤더가 없어서 분할되지 않았습니다. "
-                "다른 레벨을 선택하거나 통합 편집을 사용하세요."
-            )
+        if len(h2_sections) == 1 and h2_sections[0].title == "(전체)":
+            st.info("H2(##) 헤더가 없어 계층 편집을 쓸 수 없습니다. 통합 편집 탭을 사용하세요.")
         else:
-            for i, section in enumerate(sections):
-                with st.expander(
-                    f"📍 {i + 1}. {section.title}"
-                    + ("  (서문)" if section.is_intro else ""),
-                    expanded=False,
-                ):
-                    widget_key = f"part::{relative}::lvl{level}::{i}"
+            col_sel, col_ai = st.columns([3, 2])
+            with col_sel:
+                sel_idx = st.selectbox(
+                    "📂 대분류 선택",
+                    options=list(range(len(h2_sections))),
+                    format_func=lambda i: f"{i + 1}. {h2_sections[i].title}",
+                    key=f"h2sel::{relative}",
+                )
+            with col_ai:
+                use_ai_summary_part = st.checkbox(
+                    "AI 변경 요약 생성", value=False, key=f"ai_sum_part::{relative}",
+                )
+
+            h2 = h2_sections[sel_idx]
+            h3_subs = files.split_sections(h2.full_text, level=3)
+            st.markdown(f"#### 📂 {h2.title}")
+            st.caption(f"항목 {len(h3_subs)}개 — 각 항목을 펼쳐서 편집하세요.")
+
+            for j, sub in enumerate(h3_subs):
+                label = sub.title if not sub.is_intro else f"{h2.title} (머리말)"
+                with st.expander(f"📄 {label}", expanded=False):
+                    wkey = f"hpart::{relative}::{sel_idx}::{j}"
                     edited = st.text_area(
                         "내용",
-                        value=section.full_text,
+                        value=sub.full_text,
                         height=260,
-                        key=widget_key,
+                        key=wkey,
                         label_visibility="collapsed",
                     )
-                    part_dirty = edited != section.full_text
+                    part_dirty = edited != sub.full_text
                     pc1, pc2 = st.columns([3, 2])
                     with pc1:
                         part_note = st.text_input(
                             "메모",
-                            placeholder="이 파트의 변경 메모",
-                            key=f"note_part::{relative}::lvl{level}::{i}",
+                            placeholder="이 항목의 변경 메모",
+                            key=f"hnote::{relative}::{sel_idx}::{j}",
                             label_visibility="collapsed",
                         )
                     with pc2:
                         save_part = st.button(
-                            "💾 이 파트 저장" if part_dirty else "변경 없음",
+                            "💾 이 항목 저장" if part_dirty else "변경 없음",
                             disabled=not part_dirty,
                             type="primary" if part_dirty else "secondary",
                             use_container_width=True,
-                            key=f"save_part::{relative}::lvl{level}::{i}",
+                            key=f"hsave::{relative}::{sel_idx}::{j}",
                         )
                     if save_part and part_dirty:
-                        new_pieces = [
-                            edited if j == i else s.full_text
-                            for j, s in enumerate(sections)
-                        ]
-                        new_full = "".join(new_pieces)
-                        auto_note = part_note or f"파트 수정: {section.title}"
+                        new_h2_text = "".join(
+                            edited if k == j else s.full_text
+                            for k, s in enumerate(h3_subs)
+                        )
+                        new_full = "".join(
+                            new_h2_text if k == sel_idx else s.full_text
+                            for k, s in enumerate(h2_sections)
+                        )
+                        auto_note = part_note or f"항목 수정: {sub.title}"
                         result = _save_change(
                             backend, relative, original, new_full,
                             auto_note, use_ai_summary_part, api_key,
                         )
                         e = result["entry"]
                         st.success(
-                            f"'{section.title}' 저장 완료 · "
+                            f"'{sub.title}' 저장 완료 · "
                             f"+{e['added']} / -{e['removed']} 줄"
                         )
                         if result["ai_summary"]:
