@@ -267,7 +267,8 @@ def _save_change(
 
 
 def render_editor(backend: Backend, backend_key: str, relative: str, api_key: str):
-    file_name = Path(relative).name
+    # 다운로드 파일명에 당일 날짜를 붙임 (예: 제품정보-merged_260521.md)
+    file_name = f"{Path(relative).stem}_{time.strftime('%y%m%d')}.md"
     original = cached_read(backend_key, relative)
 
     header_cols = st.columns([5, 2])
