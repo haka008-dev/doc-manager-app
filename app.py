@@ -14,7 +14,7 @@ from pathlib import Path
 import streamlit as st
 from dotenv import load_dotenv
 
-from doc_manager import ai, changelog, files
+from doc_manager import ai, changelog, files, versions
 from doc_manager.backend import Backend, GitHubBackend, LocalBackend
 
 load_dotenv()
@@ -255,11 +255,15 @@ def _save_change(
                 st.warning(f"AI 요약 실패 (저장은 진행): {result.error}")
     msg = note or f"edit {relative}"
     backend.write_file(relative, new_text, commit_message=msg)
-    entry = changelog.append_entry(
-        backend, relative, original, new_text, note=note, ai_summary=ai_summary
-    )
+    # 저장 시점의 전체 내용을 새 버전으로 스냅샷 보관
+    vid = versions.save_version(backend, relative, new_text)
+    added, removed = changelog.diff_stats(original, new_text)
     invalidate_cache()
-    return {"entry": entry, "ai_summary": ai_summary}
+    return {
+        "entry": {"added": added, "removed": removed},
+        "ai_summary": ai_summary,
+        "version_id": vid,
+    }
 
 
 def render_editor(backend: Backend, backend_key: str, relative: str, api_key: str):
@@ -461,46 +465,68 @@ def render_editor(backend: Backend, backend_key: str, relative: str, api_key: st
 
 
 # ---------------- 변경 로그 ----------------
-def render_changelog(backend: Backend, relative: str | None):
-    st.subheader("📋 변경 로그")
-    mode = st.radio(
-        "보기 모드",
-        ["현재 파일", "전체 최근"],
-        horizontal=True,
-        label_visibility="collapsed",
-        key="log_mode",
-    )
+@st.cache_data(show_spinner=False, ttl=600)
+def cached_read_version(backend_key: str, relative: str, version_id: str) -> str:
+    backend, _ = build_backend()
+    return versions.read_version(backend, relative, version_id)
 
-    if mode == "현재 파일":
-        if relative is None:
-            st.caption("파일을 선택하세요.")
-            return
-        entries = changelog.read_entries(backend, relative)
-    else:
-        with st.spinner("최근 로그 모으는 중..."):
-            entries = changelog.read_all_entries(backend, limit=30)
 
-    if not entries:
-        st.caption("기록 없음")
+def render_version_history(backend: Backend, backend_key: str, relative: str | None):
+    st.subheader("📜 버전 히스토리")
+    if relative is None:
+        st.caption("파일을 선택하세요.")
         return
 
-    for i, e in enumerate(entries):
-        ts = e.get("timestamp", "")[:19].replace("T", " ")
-        added = e.get("added", 0)
-        removed = e.get("removed", 0)
-        note = e.get("note") or ""
-        ai_sum = e.get("ai_summary") or ""
-        title = f"{ts} · +{added}/-{removed}"
-        if note:
-            title += f" · {note}"
-        with st.expander(title, expanded=(i == 0 and mode == "현재 파일")):
-            if mode == "전체 최근":
-                st.caption(f"📄 {e.get('file', '?')}")
-            if ai_sum:
-                st.info(f"🤖 {ai_sum}")
-            diff = e.get("diff", "")
-            if diff:
-                st.code(diff, language="diff")
+    vids = versions.list_versions(backend, relative)
+    if not vids:
+        st.caption("아직 저장된 버전이 없습니다. 편집 후 저장하면 이곳에 버전이 쌓입니다.")
+        return
+
+    st.caption(f"총 {len(vids)}개 버전 · 최신순")
+
+    for i, vid in enumerate(vids):
+        label = versions.version_label(vid)
+        is_latest = i == 0
+        title = ("🟢 " if is_latest else "🕘 ") + label + ("  · 현재 버전" if is_latest else "")
+        with st.expander(title, expanded=False):
+            try:
+                content = cached_read_version(backend_key, relative, vid)
+            except Exception as exc:
+                st.error(f"버전을 불러오지 못했습니다: {exc}")
+                continue
+
+            line_cnt = content.count("\n") + 1
+            st.caption(f"{line_cnt:,}줄 · {len(content):,}자")
+            st.text_area(
+                "내용",
+                value=content,
+                height=200,
+                disabled=True,
+                key=f"vview::{relative}::{vid}",
+                label_visibility="collapsed",
+            )
+            st.download_button(
+                "📥 이 버전 .md 다운로드",
+                data=content,
+                file_name=f"{Path(relative).stem}_{vid}.md",
+                mime="text/markdown",
+                use_container_width=True,
+                key=f"vdl::{relative}::{vid}",
+            )
+            if not is_latest:
+                if st.button(
+                    "⤺ 이 버전으로 되돌리기",
+                    use_container_width=True,
+                    key=f"vrev::{relative}::{vid}",
+                ):
+                    cur = cached_read(backend_key, relative)
+                    _save_change(
+                        backend, relative, cur, content,
+                        f"{label} 버전으로 되돌림", False, "",
+                    )
+                    st.session_state.pop(f"buf::{relative}", None)
+                    st.success(f"{label} 버전으로 되돌렸습니다.")
+                    st.rerun()
 
 
 # ---------------- AI 검토 ----------------
@@ -553,7 +579,7 @@ def main():
             render_ai_review(backend, backend_key, selected_relative, api_key)
 
     with col_log:
-        render_changelog(backend, selected_relative)
+        render_version_history(backend, backend_key, selected_relative)
 
 
 if __name__ == "__main__":

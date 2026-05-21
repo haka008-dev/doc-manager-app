@@ -27,6 +27,7 @@ class Backend(Protocol):
     def write_file(self, relative: str, content: str, commit_message: str = "") -> None: ...
     def read_text_or_empty(self, relative: str) -> str: ...
     def append_text(self, relative: str, line: str, commit_message: str = "") -> None: ...
+    def list_dir(self, rel_dir: str) -> list[str]: ...
 
 
 # ---------- 로컬 폴더 백엔드 ----------
@@ -45,10 +46,14 @@ class LocalBackend:
             return []
         results: list[FileMeta] = []
         for p in self.root.rglob("*.md"):
-            if not p.is_file() or ".changelog" in p.parts:
+            if not p.is_file():
+                continue
+            rel_path = p.relative_to(self.root)
+            # .changelog / .versions 등 숨김 폴더 안의 파일은 제외
+            if any(part.startswith(".") for part in rel_path.parts):
                 continue
             stat = p.stat()
-            rel = str(p.relative_to(self.root)).replace("\\", "/")
+            rel = str(rel_path).replace("\\", "/")
             results.append(
                 FileMeta(
                     relative=rel,
@@ -78,6 +83,12 @@ class LocalBackend:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as f:
             f.write(line)
+
+    def list_dir(self, rel_dir: str) -> list[str]:
+        d = self._abs(rel_dir)
+        if not d.exists() or not d.is_dir():
+            return []
+        return sorted(p.name for p in d.iterdir() if p.is_file())
 
 
 # ---------- GitHub 백엔드 ----------
@@ -131,9 +142,7 @@ class GitHubBackend:
             for item in current:
                 if item.type == "dir":
                     if item.name.startswith("."):
-                        # .changelog 등 숨김 폴더는 트리에서 제외 (.changelog는 별도 처리)
-                        if item.name == ".changelog":
-                            continue
+                        continue  # .changelog, .versions 등 숨김 폴더 제외
                     try:
                         sub = self._repo.get_contents(item.path, ref=self.branch)
                         if not isinstance(sub, list):
@@ -197,3 +206,13 @@ class GitHubBackend:
         new = current + line
         msg = commit_message or f"append {relative}"
         self.write_file(relative, new, commit_message=msg)
+
+    def list_dir(self, rel_dir: str) -> list[str]:
+        full = self._path_in_repo(rel_dir)
+        try:
+            items = self._repo.get_contents(full, ref=self.branch)
+        except Exception:
+            return []
+        if not isinstance(items, list):
+            items = [items]
+        return sorted(it.name for it in items if it.type == "file")
