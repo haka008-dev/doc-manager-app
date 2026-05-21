@@ -28,6 +28,9 @@ class Backend(Protocol):
     def read_text_or_empty(self, relative: str) -> str: ...
     def append_text(self, relative: str, line: str, commit_message: str = "") -> None: ...
     def list_dir(self, rel_dir: str) -> list[str]: ...
+    def list_commits(self, relative: str, limit: int = 30) -> list[dict]: ...
+    def read_at_commit(self, relative: str, sha: str) -> str: ...
+    def commit_diff(self, relative: str, sha: str) -> str: ...
 
 
 # ---------- 로컬 폴더 백엔드 ----------
@@ -89,6 +92,16 @@ class LocalBackend:
         if not d.exists() or not d.is_dir():
             return []
         return sorted(p.name for p in d.iterdir() if p.is_file())
+
+    # ----- 버전 히스토리 (로컬 모드는 미지원) -----
+    def list_commits(self, relative: str, limit: int = 30) -> list[dict]:
+        return []
+
+    def read_at_commit(self, relative: str, sha: str) -> str:
+        raise RuntimeError("로컬 폴더 모드는 버전 히스토리를 지원하지 않습니다.")
+
+    def commit_diff(self, relative: str, sha: str) -> str:
+        return ""
 
 
 # ---------- GitHub 백엔드 ----------
@@ -216,3 +229,37 @@ class GitHubBackend:
         if not isinstance(items, list):
             items = [items]
         return sorted(it.name for it in items if it.type == "file")
+
+    # ----- 버전 히스토리 (GitHub 커밋 기록 활용) -----
+    def list_commits(self, relative: str, limit: int = 30) -> list[dict]:
+        full = self._path_in_repo(relative)
+        out: list[dict] = []
+        try:
+            commits = self._repo.get_commits(path=full, sha=self.branch)
+            for c in commits[:limit]:
+                out.append({
+                    "sha": c.sha,
+                    "date": c.commit.author.date,
+                    "message": c.commit.message,
+                })
+        except Exception:
+            pass
+        return out
+
+    def read_at_commit(self, relative: str, sha: str) -> str:
+        full = self._path_in_repo(relative)
+        item = self._repo.get_contents(full, ref=sha)
+        if isinstance(item, list):
+            raise RuntimeError(f"디렉토리 경로입니다: {full}")
+        return item.decoded_content.decode("utf-8")
+
+    def commit_diff(self, relative: str, sha: str) -> str:
+        full = self._path_in_repo(relative)
+        try:
+            commit = self._repo.get_commit(sha)
+            for f in commit.files:
+                if f.filename == full:
+                    return f.patch or ""
+        except Exception:
+            pass
+        return ""

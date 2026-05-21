@@ -9,12 +9,13 @@ from __future__ import annotations
 import hmac
 import os
 import time
+from datetime import timedelta, timezone
 from pathlib import Path
 
 import streamlit as st
 from dotenv import load_dotenv
 
-from doc_manager import ai, changelog, files, versions
+from doc_manager import ai, changelog, files
 from doc_manager.backend import Backend, GitHubBackend, LocalBackend
 
 load_dotenv()
@@ -253,16 +254,14 @@ def _save_change(
                 ai_summary = result.text
             else:
                 st.warning(f"AI 요약 실패 (저장은 진행): {result.error}")
+    # write_file이 GitHub 커밋을 생성 — 그 커밋이 곧 버전 기록이 됨
     msg = note or f"edit {relative}"
     backend.write_file(relative, new_text, commit_message=msg)
-    # 저장 시점의 전체 내용을 새 버전으로 스냅샷 보관
-    vid = versions.save_version(backend, relative, new_text)
     added, removed = changelog.diff_stats(original, new_text)
     invalidate_cache()
     return {
         "entry": {"added": added, "removed": removed},
         "ai_summary": ai_summary,
-        "version_id": vid,
     }
 
 
@@ -466,10 +465,25 @@ def render_editor(backend: Backend, backend_key: str, relative: str, api_key: st
 
 
 # ---------------- 변경 로그 ----------------
-@st.cache_data(show_spinner=False, ttl=600)
-def cached_read_version(backend_key: str, relative: str, version_id: str) -> str:
+@st.cache_data(show_spinner=False, ttl=300)
+def cached_list_commits(backend_key: str, relative: str) -> list[dict]:
     backend, _ = build_backend()
-    return versions.read_version(backend, relative, version_id)
+    return backend.list_commits(relative, limit=30)
+
+
+@st.cache_data(show_spinner=False, ttl=900)
+def cached_commit_diff(backend_key: str, relative: str, sha: str) -> str:
+    backend, _ = build_backend()
+    return backend.commit_diff(relative, sha)
+
+
+@st.cache_data(show_spinner=False, ttl=900)
+def cached_read_at_commit(backend_key: str, relative: str, sha: str) -> str:
+    backend, _ = build_backend()
+    return backend.read_at_commit(relative, sha)
+
+
+_KST = timezone(timedelta(hours=9))
 
 
 def render_version_history(backend: Backend, backend_key: str, relative: str | None):
@@ -478,56 +492,54 @@ def render_version_history(backend: Backend, backend_key: str, relative: str | N
         st.caption("파일을 선택하세요.")
         return
 
-    vids = versions.list_versions(backend, relative)
-    if not vids:
-        st.caption("아직 저장된 버전이 없습니다. 편집 후 저장하면 이곳에 버전이 쌓입니다.")
+    commits = cached_list_commits(backend_key, relative)
+    if not commits:
+        st.caption(
+            "저장 기록이 아직 없습니다. (로컬 폴더 모드에서는 버전 히스토리가 "
+            "지원되지 않아요 — GitHub 모드에서만 동작합니다.)"
+        )
         return
 
-    st.caption(f"총 {len(vids)}개 버전 · 최신순")
+    st.caption(f"최근 {len(commits)}개 버전 · 최신순")
 
-    for i, vid in enumerate(vids):
-        label = versions.version_label(vid)
+    for i, c in enumerate(commits):
+        sha = c["sha"]
+        try:
+            label = c["date"].astimezone(_KST).strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            label = str(c.get("date", ""))[:16]
+        msg = (c.get("message") or "").split("\n")[0].strip()
         is_latest = i == 0
-        title = ("🟢 " if is_latest else "🕘 ") + label + ("  · 현재 버전" if is_latest else "")
+        title = ("🟢 " if is_latest else "🕘 ") + label
+        if msg:
+            title += f" · {msg}"
         with st.expander(title, expanded=False):
-            try:
-                content = cached_read_version(backend_key, relative, vid)
-            except Exception as exc:
-                st.error(f"버전을 불러오지 못했습니다: {exc}")
-                continue
-
-            line_cnt = content.count("\n") + 1
-            st.caption(f"{line_cnt:,}줄 · {len(content):,}자")
-            st.text_area(
-                "내용",
-                value=content,
-                height=200,
-                disabled=True,
-                key=f"vview::{relative}::{vid}",
-                label_visibility="collapsed",
-            )
-            st.download_button(
-                "📥 이 버전 .md 다운로드",
-                data=content,
-                file_name=f"{Path(relative).stem}_{vid}.md",
-                mime="text/markdown",
-                use_container_width=True,
-                key=f"vdl::{relative}::{vid}",
-            )
+            diff = cached_commit_diff(backend_key, relative, sha)
+            if diff:
+                st.code(diff, language="diff")
+            else:
+                st.caption("(이 버전의 변경 내역을 표시할 수 없습니다)")
             if not is_latest:
                 if st.button(
                     "⤺ 이 버전으로 되돌리기",
                     use_container_width=True,
-                    key=f"vrev::{relative}::{vid}",
+                    key=f"vrev::{relative}::{sha}",
                 ):
-                    cur = cached_read(backend_key, relative)
-                    _save_change(
-                        backend, relative, cur, content,
-                        f"{label} 버전으로 되돌림", False, "",
-                    )
-                    st.session_state.pop(f"buf::{relative}", None)
-                    st.success(f"{label} 버전으로 되돌렸습니다.")
-                    st.rerun()
+                    try:
+                        old_content = cached_read_at_commit(
+                            backend_key, relative, sha
+                        )
+                    except Exception as exc:
+                        st.error(f"버전을 불러오지 못했습니다: {exc}")
+                    else:
+                        cur = cached_read(backend_key, relative)
+                        _save_change(
+                            backend, relative, cur, old_content,
+                            f"{label} 버전으로 되돌림", False, "",
+                        )
+                        st.session_state.pop(f"buf::{relative}", None)
+                        st.success(f"{label} 버전으로 되돌렸습니다.")
+                        st.rerun()
 
 
 # ---------------- AI 검토 ----------------
