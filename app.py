@@ -334,81 +334,119 @@ def render_editor(backend: Backend, backend_key: str, relative: str, api_key: st
 
     # ---- 파트별 편집 ----
     with tab_parts:
-        st.caption("대분류(##)를 고르면, 그 안의 항목(###)을 하나씩 펼쳐서 따로 편집할 수 있어요.")
+        st.caption("왼쪽 목차에서 항목을 클릭하면 오른쪽에서 바로 편집할 수 있어요.")
         h2_sections = files.split_sections(original, level=2)
 
         if len(h2_sections) == 1 and h2_sections[0].title == "(전체)":
-            st.info("H2(##) 헤더가 없어 계층 편집을 쓸 수 없습니다. 통합 편집 탭을 사용하세요.")
+            st.info("H2(##) 헤더가 없어 목차 편집을 쓸 수 없습니다. 통합 편집 탭을 사용하세요.")
         else:
-            col_sel, col_ai = st.columns([3, 2])
-            with col_sel:
-                sel_idx = st.selectbox(
-                    "📂 대분류 선택",
-                    options=list(range(len(h2_sections))),
-                    format_func=lambda i: f"{i + 1}. {h2_sections[i].title}",
-                    key=f"h2sel::{relative}",
-                )
-            with col_ai:
-                use_ai_summary_part = st.checkbox(
-                    "AI 변경 요약 생성", value=False, key=f"ai_sum_part::{relative}",
-                )
+            sel_key = f"tocsel::{relative}"
+            col_toc, col_edit = st.columns([2, 5], gap="medium")
 
-            h2 = h2_sections[sel_idx]
-            h3_subs = files.split_sections(h2.full_text, level=3)
-            st.markdown(f"#### 📂 {h2.title}")
-            st.caption(f"항목 {len(h3_subs)}개 — 각 항목을 펼쳐서 편집하세요.")
+            with col_toc:
+                query = st.text_input(
+                    "목차 검색",
+                    placeholder="🔍 항목 검색...",
+                    key=f"tocq::{relative}",
+                    label_visibility="collapsed",
+                )
+                ql = query.strip().lower()
+                current = st.session_state.get(sel_key)
+                shown = 0
+                for hi, h2 in enumerate(h2_sections):
+                    h3_subs = files.split_sections(h2.full_text, level=3)
+                    matched = [
+                        (si, s) for si, s in enumerate(h3_subs)
+                        if not ql or ql in s.title.lower()
+                    ]
+                    if not matched:
+                        continue
+                    st.markdown(f"**{h2.title}**")
+                    for si, sub in matched:
+                        shown += 1
+                        is_sel = current == (hi, si)
+                        if st.button(
+                            sub.title,
+                            key=f"tocbtn::{relative}::{hi}::{si}",
+                            use_container_width=True,
+                            type="primary" if is_sel else "secondary",
+                        ):
+                            st.session_state[sel_key] = (hi, si)
+                            st.rerun()
+                if shown == 0:
+                    st.caption("검색 결과 없음")
 
-            for j, sub in enumerate(h3_subs):
-                label = sub.title if not sub.is_intro else f"{h2.title} (머리말)"
-                with st.expander(f"📄 {label}", expanded=False):
-                    wkey = f"hpart::{relative}::{sel_idx}::{j}"
-                    edited = st.text_area(
-                        "내용",
-                        value=sub.full_text,
-                        height=260,
-                        key=wkey,
-                        label_visibility="collapsed",
+            with col_edit:
+                sel = st.session_state.get(sel_key)
+                if sel is None:
+                    st.info("← 왼쪽 목차에서 편집할 항목을 클릭하세요.")
+                else:
+                    hi, si = sel
+                    valid = hi < len(h2_sections)
+                    h3_subs = (
+                        files.split_sections(h2_sections[hi].full_text, level=3)
+                        if valid else []
                     )
-                    part_dirty = edited != sub.full_text
-                    pc1, pc2 = st.columns([3, 2])
-                    with pc1:
-                        part_note = st.text_input(
-                            "메모",
-                            placeholder="이 항목의 변경 메모",
-                            key=f"hnote::{relative}::{sel_idx}::{j}",
+                    if not valid or si >= len(h3_subs):
+                        st.warning("문서 구조가 바뀌었어요. 목차에서 다시 선택하세요.")
+                    else:
+                        h2 = h2_sections[hi]
+                        sub = h3_subs[si]
+                        st.markdown(f"#### {h2.title}  ›  {sub.title}")
+                        wkey = f"toced::{relative}::{hi}::{si}"
+                        edited = st.text_area(
+                            "내용",
+                            value=sub.full_text,
+                            height=420,
+                            key=wkey,
                             label_visibility="collapsed",
                         )
-                    with pc2:
-                        save_part = st.button(
-                            "💾 이 항목 저장" if part_dirty else "변경 없음",
-                            disabled=not part_dirty,
-                            type="primary" if part_dirty else "secondary",
-                            use_container_width=True,
-                            key=f"hsave::{relative}::{sel_idx}::{j}",
-                        )
-                    if save_part and part_dirty:
-                        new_h2_text = "".join(
-                            edited if k == j else s.full_text
-                            for k, s in enumerate(h3_subs)
-                        )
-                        new_full = "".join(
-                            new_h2_text if k == sel_idx else s.full_text
-                            for k, s in enumerate(h2_sections)
-                        )
-                        auto_note = part_note or f"항목 수정: {sub.title}"
-                        result = _save_change(
-                            backend, relative, original, new_full,
-                            auto_note, use_ai_summary_part, api_key,
-                        )
-                        e = result["entry"]
-                        st.success(
-                            f"'{sub.title}' 저장 완료 · "
-                            f"+{e['added']} / -{e['removed']} 줄"
-                        )
-                        if result["ai_summary"]:
-                            st.info(f"🤖 {result['ai_summary']}")
-                        st.session_state.pop(f"buf::{relative}", None)
-                        st.rerun()
+                        part_dirty = edited != sub.full_text
+                        ec1, ec2, ec3 = st.columns([3, 2, 2])
+                        with ec1:
+                            part_note = st.text_input(
+                                "메모",
+                                placeholder="이 항목의 변경 메모",
+                                key=f"tocnote::{relative}::{hi}::{si}",
+                                label_visibility="collapsed",
+                            )
+                        with ec2:
+                            use_ai_summary_part = st.checkbox(
+                                "AI 변경 요약",
+                                value=False,
+                                key=f"tocai::{relative}::{hi}::{si}",
+                            )
+                        with ec3:
+                            save_part = st.button(
+                                "💾 저장" if part_dirty else "변경 없음",
+                                disabled=not part_dirty,
+                                type="primary" if part_dirty else "secondary",
+                                use_container_width=True,
+                                key=f"tocsave::{relative}::{hi}::{si}",
+                            )
+                        if save_part and part_dirty:
+                            new_h2_text = "".join(
+                                edited if k == si else s.full_text
+                                for k, s in enumerate(h3_subs)
+                            )
+                            new_full = "".join(
+                                new_h2_text if k == hi else s.full_text
+                                for k, s in enumerate(h2_sections)
+                            )
+                            auto_note = part_note or f"항목 수정: {sub.title}"
+                            result = _save_change(
+                                backend, relative, original, new_full,
+                                auto_note, use_ai_summary_part, api_key,
+                            )
+                            e = result["entry"]
+                            st.success(
+                                f"'{sub.title}' 저장 완료 · "
+                                f"+{e['added']} / -{e['removed']} 줄"
+                            )
+                            if result["ai_summary"]:
+                                st.info(f"🤖 {result['ai_summary']}")
+                            st.session_state.pop(f"buf::{relative}", None)
+                            st.rerun()
 
     with tab_preview:
         st.markdown(original)
