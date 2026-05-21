@@ -42,6 +42,8 @@ st.markdown(
     [data-testid="stExpander"] summary { padding: 0.28rem 0.55rem; font-size: 0.8rem; }
     [data-testid="stExpander"] summary p { font-size: 0.8rem; }
     [data-testid="stExpander"] summary svg { width: 0.9rem; height: 0.9rem; }
+    /* 편집 영역(textarea) 글자 키우기 */
+    .stTextArea textarea { font-size: 1rem; line-height: 1.55; }
     </style>
     """,
     unsafe_allow_html=True,
