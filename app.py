@@ -16,7 +16,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 from dotenv import load_dotenv
 
-from doc_manager import ai, changelog, files
+from doc_manager import ai, auth, changelog, files
 from doc_manager.backend import Backend, GitHubBackend, LocalBackend
 
 load_dotenv()
@@ -163,71 +163,152 @@ def _secret(key: str, default: str = "") -> str:
     return os.environ.get(key, default)
 
 
-# ---------------- 비밀번호 게이트 (무차별 대입 차단 포함) ----------------
-MAX_ATTEMPTS = 5          # 누적 실패 허용 횟수
+# ---------------- 로그인 게이트 (다중 사용자 + 무차별 대입 차단) ----------------
+MAX_ATTEMPTS = 5          # 사용자별 누적 실패 허용 횟수
 LOCKOUT_SECONDS = 300     # 잠금 시간 (5분)
 
 
 @st.cache_resource
 def _auth_state() -> dict:
-    """모든 세션이 공유하는 인증 상태. 무차별 대입 방어용 전역 카운터.
+    """모든 세션이 공유하는 인증 상태 — 사용자별 잠금 카운터.
 
-    st.cache_resource는 앱 프로세스 전체에서 단 하나만 존재하므로,
-    공격자가 새 탭/세션을 열어도 이 카운터는 우회되지 않습니다.
+    한 사용자가 5회 실패해도 다른 사용자에겐 영향 없음.
+    프로세스 단위 공유라 새 탭으로 우회 불가.
     """
-    return {"fail_count": 0, "locked_until": 0.0}
+    return {"fail_counts": {}, "locked_until": {}}
 
 
-def require_password() -> None:
-    """APP_PASSWORD가 설정되어 있으면 비밀번호 입력을 요구. 미설정이면 통과.
+def require_login(backend: Backend) -> auth.User:
+    """로그인된 User를 반환. 인증 안 됐으면 로그인/부트스트랩 UI 표시 후 st.stop().
 
-    보안:
-      - hmac.compare_digest 로 상수 시간 비교 (timing attack 방어)
-      - 누적 MAX_ATTEMPTS회 실패 시 LOCKOUT_SECONDS 동안 전역 잠금
+    - 로컬 모드: 인증 우회 (개발 편의용 가상 admin 반환)
+    - GitHub 모드 + 사용자 없음: 부트스트랩 화면 (APP_PASSWORD로 첫 admin 생성)
+    - GitHub 모드 + 사용자 있음: 일반 로그인 화면
     """
-    expected = _secret("APP_PASSWORD")
-    if not expected:
+    # 로컬 모드는 가상 사용자로 우회 — 개발 편의
+    if backend.name == "local":
+        return auth.User(
+            id="local", name="로컬 개발자", password_hash="",
+            role=auth.ROLE_ADMIN, created_at="",
+        )
+
+    # 세션에 저장된 사용자가 있으면 실재 여부 재검증
+    if st.session_state.get("user"):
+        u = st.session_state["user"]
+        if isinstance(u, dict):  # 직렬화돼 있던 경우
+            u = auth.User(**u)
+            st.session_state["user"] = u
+        existing = auth.find_user(auth.load_users(backend), u.id)
+        if existing:
+            return existing
+        # 사용자가 삭제됐거나 변경됨 — 세션 무효화
+        st.session_state.pop("user", None)
+
+    users = auth.load_users(backend)
+    if not users:
+        _render_bootstrap_page(backend)
+    else:
+        _render_login_page(backend, users)
+    st.stop()
+
+
+def _render_bootstrap_page(backend: Backend) -> None:
+    """첫 사용자가 없을 때 — 기존 APP_PASSWORD를 일회용 키로 써서 admin 생성."""
+    setup_secret = _secret("APP_PASSWORD")
+
+    st.title("🔧 초기 관리자 계정 설정")
+
+    if not setup_secret:
+        st.error(
+            "초기 설정용 `APP_PASSWORD`가 secrets에 없습니다. "
+            "Streamlit Cloud > Settings > Secrets에서 `APP_PASSWORD` 값을 "
+            "임시로 설정한 뒤 이 화면에서 사용한 다음 제거하세요."
+        )
         return
-    if st.session_state.get("authed"):
-        return
+
+    st.markdown(
+        "아직 등록된 사용자가 없습니다. 첫 **관리자 계정**을 만들어주세요. "
+        "이후엔 이 화면이 더 이상 나타나지 않습니다."
+    )
+    st.caption("초기 설정 비밀번호는 기존 앱 비밀번호(`APP_PASSWORD`)와 같습니다.")
+
+    setup_pw = st.text_input("초기 설정 비밀번호 (APP_PASSWORD)", type="password")
+    col1, col2 = st.columns(2)
+    with col1:
+        new_id = st.text_input("관리자 아이디", placeholder="영문/숫자/_, 2-32자")
+    with col2:
+        new_name = st.text_input("이름", placeholder="화면 표시명 (예: 김매니저)")
+    new_pw = st.text_input("새 비밀번호", type="password", placeholder="최소 8자")
+    new_pw2 = st.text_input("새 비밀번호 확인", type="password")
+
+    if st.button("관리자 계정 만들기", type="primary"):
+        if not hmac.compare_digest(
+            setup_pw.encode("utf-8"), setup_secret.encode("utf-8")
+        ):
+            st.error("초기 설정 비밀번호가 일치하지 않습니다.")
+            return
+        err = auth.validate_user_id(new_id) or auth.validate_password(new_pw)
+        if err:
+            st.error(err)
+            return
+        if not new_name.strip():
+            st.error("이름을 입력하세요.")
+            return
+        if new_pw != new_pw2:
+            st.error("비밀번호가 일치하지 않습니다.")
+            return
+        admin = auth.make_user(new_id, new_name, new_pw, auth.ROLE_ADMIN)
+        auth.save_users(backend, [admin],
+                        commit_message=f"bootstrap admin user: {admin.id}")
+        st.session_state["user"] = admin
+        st.success(f"{admin.name} 관리자 계정 생성 완료. 메인 화면으로 이동합니다.")
+        st.rerun()
+
+
+def _render_login_page(backend: Backend, users: list[auth.User]) -> None:
+    st.title("🔒 챗봇 문서 관리기")
 
     state = _auth_state()
     now = time.time()
 
-    st.title("🔒 챗봇 문서 관리기")
+    user_id = st.text_input("아이디", key="login_id_input")
+    pw = st.text_input("비밀번호", type="password", key="login_pw_input")
 
-    # 잠금 상태면 입력 자체를 막음
-    remaining = state["locked_until"] - now
-    if remaining > 0:
-        mins = int(remaining // 60) + 1
-        st.error(
-            f"비밀번호를 여러 번 틀려 로그인이 잠겼습니다. "
-            f"약 {mins}분 후 다시 시도하세요."
-        )
-        st.stop()
+    # 입력된 ID가 잠금 상태면 시도 자체를 막음
+    if user_id:
+        remaining = state["locked_until"].get(user_id, 0) - now
+        if remaining > 0:
+            mins = int(remaining // 60) + 1
+            st.error(
+                f"이 아이디는 비밀번호를 여러 번 틀려 잠겼습니다. "
+                f"약 {mins}분 후 다시 시도하세요."
+            )
+            return
 
-    st.caption("비밀번호를 입력하세요.")
-    pw = st.text_input("비밀번호", type="password", label_visibility="collapsed")
     if st.button("로그인", type="primary"):
-        if not pw:
-            st.warning("비밀번호를 입력하세요.")
-        elif hmac.compare_digest(pw.encode("utf-8"), expected.encode("utf-8")):
-            state["fail_count"] = 0
-            st.session_state["authed"] = True
+        if not user_id or not pw:
+            st.warning("아이디와 비밀번호를 입력하세요.")
+            return
+        user = auth.find_user(users, user_id)
+        if user and auth.verify_password(pw, user.password_hash):
+            state["fail_counts"].pop(user_id, None)
+            st.session_state["user"] = user
             st.rerun()
         else:
-            state["fail_count"] += 1
-            left = MAX_ATTEMPTS - state["fail_count"]
+            fc = state["fail_counts"].get(user_id, 0) + 1
+            state["fail_counts"][user_id] = fc
+            left = MAX_ATTEMPTS - fc
             if left <= 0:
-                state["locked_until"] = now + LOCKOUT_SECONDS
-                state["fail_count"] = 0
+                state["locked_until"][user_id] = now + LOCKOUT_SECONDS
+                state["fail_counts"].pop(user_id, None)
                 st.error(
                     f"비밀번호를 {MAX_ATTEMPTS}회 틀렸습니다. "
-                    f"{LOCKOUT_SECONDS // 60}분간 로그인이 잠깁니다."
+                    f"이 아이디는 {LOCKOUT_SECONDS // 60}분간 잠깁니다."
                 )
             else:
-                st.error(f"비밀번호가 일치하지 않습니다. (남은 시도: {left}회)")
-    st.stop()
+                st.error(
+                    f"아이디 또는 비밀번호가 일치하지 않습니다. (남은 시도: {left}회)"
+                )
 
 
 # ---------------- 백엔드 선택 ----------------
@@ -290,9 +371,11 @@ def backend_cache_key(label: str) -> str:
 
 
 # ---------------- 사이드바 ----------------
-def render_sidebar(backend_label: str) -> str:
+def render_sidebar(backend_label: str, user: auth.User) -> str:
     st.sidebar.header("⚙️ 설정")
     st.sidebar.markdown(f"**저장소:** {backend_label}")
+    role_badge = "👑 admin" if user.is_admin else "✏️ editor"
+    st.sidebar.markdown(f"**로그인:** 👤 {user.name} · {role_badge}")
 
     if backend_label.startswith("📁"):
         # 로컬 모드만 폴더 변경 가능
@@ -316,10 +399,16 @@ def render_sidebar(backend_label: str) -> str:
         invalidate_cache()
         st.rerun()
 
-    if st.session_state.get("authed"):
-        if st.sidebar.button("🚪 로그아웃", use_container_width=True):
-            st.session_state["authed"] = False
+    # 관리자만 보이는 사용자 관리 페이지 진입 버튼
+    if user.is_admin:
+        if st.sidebar.button("👥 사용자 관리", use_container_width=True):
+            st.session_state["show_admin"] = True
             st.rerun()
+
+    if st.sidebar.button("🚪 로그아웃", use_container_width=True):
+        st.session_state.pop("user", None)
+        st.session_state.pop("show_admin", None)
+        st.rerun()
 
     return api_key
 
@@ -369,6 +458,7 @@ def _save_change(
     note: str,
     use_ai_summary: bool,
     api_key: str,
+    user: auth.User | None = None,
 ) -> dict:
     ai_summary = ""
     if use_ai_summary and api_key:
@@ -381,6 +471,8 @@ def _save_change(
                 st.warning(f"AI 요약 실패 (저장은 진행): {result.error}")
     # write_file이 GitHub 커밋을 생성 — 그 커밋이 곧 버전 기록이 됨
     msg = note or f"edit {relative}"
+    if user and user.id != "local":
+        msg += f" — by {user.name}"
     backend.write_file(relative, new_text, commit_message=msg)
     added, removed = changelog.diff_stats(original, new_text)
     invalidate_cache()
@@ -390,7 +482,7 @@ def _save_change(
     }
 
 
-def _render_store_add(backend, relative, original, regions, api_key):
+def _render_store_add(backend, relative, original, regions, api_key, user):
     """운영 문서 매장 추가 탭 — 시·구 선택 + 양식 입력 + 삽입."""
     st.caption("시·구를 고르고 매장 정보를 입력하면 해당 구역 끝에 양식대로 추가됩니다.")
 
@@ -425,7 +517,7 @@ def _render_store_add(backend, relative, original, regions, api_key):
             )
             result = _save_change(
                 backend, relative, original, new_full,
-                f"매장 추가: {name.strip()} ({gu_name})", False, api_key,
+                f"매장 추가: {name.strip()} ({gu_name})", False, api_key, user,
             )
             e = result["entry"]
             st.success(f"'{name.strip()}' 추가 완료 · +{e['added']} / -{e['removed']} 줄")
@@ -433,7 +525,8 @@ def _render_store_add(backend, relative, original, regions, api_key):
             st.rerun()
 
 
-def render_editor(backend: Backend, backend_key: str, relative: str, api_key: str):
+def render_editor(backend: Backend, backend_key: str, relative: str,
+                  api_key: str, user: auth.User):
     # 다운로드 파일명에 당일 날짜를 붙임 (예: 제품정보-merged_260521.md)
     file_name = f"{Path(relative).stem}_{time.strftime('%y%m%d')}.md"
     original = cached_read(backend_key, relative)
@@ -499,7 +592,8 @@ def render_editor(backend: Backend, backend_key: str, relative: str, api_key: st
 
         if save_btn and is_dirty:
             result = _save_change(
-                backend, relative, original, new_text, note, use_ai_summary, api_key
+                backend, relative, original, new_text, note, use_ai_summary,
+                api_key, user,
             )
             e = result["entry"]
             st.success(f"저장 완료 · +{e['added']} / -{e['removed']} 줄")
@@ -565,7 +659,7 @@ def render_editor(backend: Backend, backend_key: str, relative: str, api_key: st
                         )
                         _save_change(
                             backend, relative, original, new_full,
-                            f"새 파트 추가: {title}", False, api_key,
+                            f"새 파트 추가: {title}", False, api_key, user,
                         )
                         st.session_state[sel_key] = (new_h2_idx, len(old_subs))
                         st.session_state.pop(f"buf::{relative}", None)
@@ -677,7 +771,7 @@ def render_editor(backend: Backend, backend_key: str, relative: str, api_key: st
                             auto_note = part_note or f"항목 수정: {sub.title}"
                             result = _save_change(
                                 backend, relative, original, new_full,
-                                auto_note, use_ai_summary_part, api_key,
+                                auto_note, use_ai_summary_part, api_key, user,
                             )
                             e = result["entry"]
                             st.success(
@@ -702,7 +796,7 @@ def render_editor(backend: Backend, backend_key: str, relative: str, api_key: st
 
     if tab_store is not None:
         with tab_store:
-            _render_store_add(backend, relative, original, regions, api_key)
+            _render_store_add(backend, relative, original, regions, api_key, user)
 
     # 편집용 textarea에서 TAB 들여쓰기 활성화
     enable_tab_indent()
@@ -730,7 +824,8 @@ def cached_read_at_commit(backend_key: str, relative: str, sha: str) -> str:
 _KST = timezone(timedelta(hours=9))
 
 
-def render_version_history(backend: Backend, backend_key: str, relative: str | None):
+def render_version_history(backend: Backend, backend_key: str,
+                           relative: str | None, user: auth.User):
     st.subheader("📜 버전 히스토리")
     if relative is None:
         st.caption("파일을 선택하세요.")
@@ -779,7 +874,7 @@ def render_version_history(backend: Backend, backend_key: str, relative: str | N
                         cur = cached_read(backend_key, relative)
                         _save_change(
                             backend, relative, cur, old_content,
-                            f"{label} 버전으로 되돌림", False, "",
+                            f"{label} 버전으로 되돌림", False, "", user,
                         )
                         st.session_state.pop(f"buf::{relative}", None)
                         st.success(f"{label} 버전으로 되돌렸습니다.")
@@ -805,22 +900,154 @@ def render_ai_review(backend: Backend, backend_key: str, relative: str, api_key:
         st.markdown(st.session_state[review_key])
 
 
+# ---------------- 관리자 페이지 ----------------
+def render_admin_page(backend: Backend, cur_user: auth.User) -> None:
+    """사용자 추가/삭제/역할/비밀번호 초기화. admin만 진입 가능."""
+    if not cur_user.is_admin:
+        st.error("관리자만 접근할 수 있는 페이지입니다.")
+        return
+
+    st.subheader("👥 사용자 관리")
+    st.caption("사용자를 추가/삭제하거나 비밀번호·역할을 변경할 수 있습니다.")
+
+    users = auth.load_users(backend)
+
+    # ----- 등록된 사용자 목록 -----
+    st.markdown("#### 등록된 사용자")
+    if not users:
+        st.info("등록된 사용자가 없습니다.")
+    for u in users:
+        is_self = u.id == cur_user.id
+        title = f"{u.name} (`{u.id}`) — {u.role}"
+        if is_self:
+            title += " · 본인"
+        with st.expander(title, expanded=False):
+            st.caption(f"생성일: {u.created_at}")
+
+            # 비밀번호 초기화
+            with st.form(f"reset_pw_{u.id}", clear_on_submit=True):
+                new_pw = st.text_input(
+                    "새 비밀번호", type="password", placeholder="최소 8자",
+                    key=f"newpw_{u.id}",
+                )
+                if st.form_submit_button("비밀번호 변경"):
+                    err = auth.validate_password(new_pw)
+                    if err:
+                        st.error(err)
+                    else:
+                        u.password_hash = auth.hash_password(new_pw)
+                        auth.save_users(
+                            backend, users,
+                            commit_message=f"reset password: {u.id}",
+                        )
+                        st.success(f"{u.name}의 비밀번호를 변경했습니다.")
+                        st.rerun()
+
+            # 역할 변경 (본인 제외 — 마지막 admin 보호)
+            if not is_self:
+                col_r1, col_r2 = st.columns([3, 2])
+                with col_r1:
+                    new_role = st.selectbox(
+                        "역할", [auth.ROLE_EDITOR, auth.ROLE_ADMIN],
+                        index=0 if u.role == auth.ROLE_EDITOR else 1,
+                        key=f"role_sel_{u.id}",
+                    )
+                with col_r2:
+                    st.write("")
+                    if new_role != u.role and st.button(
+                        f"{new_role}(으)로 변경", key=f"role_btn_{u.id}",
+                        use_container_width=True,
+                    ):
+                        u.role = new_role
+                        auth.save_users(
+                            backend, users,
+                            commit_message=f"change role: {u.id} → {new_role}",
+                        )
+                        st.success("역할 변경 완료.")
+                        st.rerun()
+
+                # 삭제
+                if st.button(
+                    "🗑 이 사용자 삭제",
+                    key=f"del_btn_{u.id}",
+                    help="삭제된 사용자는 더 이상 로그인할 수 없습니다.",
+                ):
+                    new_list = [x for x in users if x.id != u.id]
+                    auth.save_users(
+                        backend, new_list,
+                        commit_message=f"remove user: {u.id}",
+                    )
+                    st.success(f"{u.name} 삭제됨.")
+                    st.rerun()
+
+    # ----- 새 사용자 추가 -----
+    st.divider()
+    st.markdown("#### 새 사용자 추가")
+    with st.form("add_user", clear_on_submit=True):
+        col1, col2 = st.columns(2)
+        with col1:
+            new_id = st.text_input("아이디", placeholder="영문/숫자/_, 2-32자")
+            new_role = st.selectbox(
+                "역할", [auth.ROLE_EDITOR, auth.ROLE_ADMIN],
+                help="editor: 문서 편집만 / admin: 사용자 관리까지",
+            )
+        with col2:
+            new_name = st.text_input("이름", placeholder="화면 표시명")
+            new_pw = st.text_input(
+                "임시 비밀번호", type="password",
+                placeholder="최소 8자 (사용자에게 전달)",
+            )
+
+        if st.form_submit_button("➕ 사용자 추가", type="primary"):
+            err = auth.validate_user_id(new_id) or auth.validate_password(new_pw)
+            if err:
+                st.error(err)
+            elif not new_name.strip():
+                st.error("이름을 입력하세요.")
+            elif auth.find_user(users, new_id):
+                st.error(f"아이디 '{new_id}'는 이미 사용 중입니다.")
+            else:
+                new_user = auth.make_user(new_id, new_name, new_pw, new_role)
+                users.append(new_user)
+                auth.save_users(
+                    backend, users,
+                    commit_message=f"add user: {new_user.id}",
+                )
+                st.success(
+                    f"✅ {new_user.name}({new_user.id}) 추가됨. "
+                    "임시 비밀번호를 본인에게 전달해 주세요."
+                )
+                st.rerun()
+
+
 # ---------------- 메인 ----------------
 def main():
-    require_password()
-
+    # 1) 백엔드 먼저 구성 (사용자 데이터 읽기에 필요)
     try:
         backend, backend_label = build_backend()
     except Exception as e:
         st.error(f"백엔드 초기화 실패: {e}")
         st.stop()
 
-    api_key = render_sidebar(backend_label)
+    # 2) 로그인 게이트 (실패 시 내부에서 st.stop)
+    user = require_login(backend)
+
+    # 3) 사이드바 (현재 사용자 표시 + 관리자 링크 + 로그아웃)
+    api_key = render_sidebar(backend_label, user)
     backend_key = backend_cache_key(backend_label)
 
     st.title("📚 챗봇 문서 관리기")
     st.caption(backend_label)
 
+    # 4) 관리자 페이지 라우팅
+    if st.session_state.get("show_admin"):
+        if st.button("◀ 메인으로 돌아가기"):
+            st.session_state.pop("show_admin", None)
+            st.rerun()
+        render_admin_page(backend, user)
+        return
+
+    # 5) 일반 사용자 UI
     col_files, col_main, col_log = st.columns([2, 6, 2], gap="medium")
 
     with col_files:
@@ -831,12 +1058,12 @@ def main():
         if selected_relative is None:
             st.info("좌측에서 파일을 선택하세요.")
         else:
-            render_editor(backend, backend_key, selected_relative, api_key)
+            render_editor(backend, backend_key, selected_relative, api_key, user)
             st.divider()
             render_ai_review(backend, backend_key, selected_relative, api_key)
 
     with col_log:
-        render_version_history(backend, backend_key, selected_relative)
+        render_version_history(backend, backend_key, selected_relative, user)
 
 
 if __name__ == "__main__":
