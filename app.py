@@ -13,6 +13,7 @@ from datetime import timedelta, timezone
 from pathlib import Path
 
 import streamlit as st
+import streamlit.components.v1 as components
 from dotenv import load_dotenv
 
 from doc_manager import ai, changelog, files
@@ -44,10 +45,110 @@ st.markdown(
     [data-testid="stExpander"] summary svg { width: 0.9rem; height: 0.9rem; }
     /* 편집 영역(textarea) 글자 키우기 */
     .stTextArea textarea { font-size: 1rem; line-height: 1.55; }
+    /* "새 파트 추가" 박스 — expander 내부 입력 요소 컴팩트하게 */
+    [data-testid="stExpander"] label p { font-size: 0.72rem; margin-bottom: 0.1rem; }
+    [data-testid="stExpander"] [data-baseweb="select"] { font-size: 0.76rem; }
+    [data-testid="stExpander"] [data-baseweb="select"] > div { min-height: 1.9rem; }
+    [data-testid="stExpander"] [data-baseweb="select"] svg { width: 0.95rem; height: 0.95rem; }
+    [data-testid="stExpander"] .stTextInput input { font-size: 0.76rem; padding: 0.22rem 0.5rem; }
+    [data-testid="stExpander"] [data-testid="stCaptionContainer"] { font-size: 0.7rem; }
+    [data-testid="stExpander"] [data-testid="stCaptionContainer"] p { font-size: 0.7rem; }
+    /* 드롭다운을 펼쳤을 때의 옵션 목록 글자 축소 (body 최상단에 그려짐) */
+    [data-baseweb="popover"] li,
+    [data-baseweb="popover"] [role="option"] {
+        font-size: 0.78rem; min-height: 0;
+        padding-top: 0.22rem; padding-bottom: 0.22rem;
+    }
     </style>
     """,
     unsafe_allow_html=True,
 )
+
+
+# ---------------- 편집기 TAB 들여쓰기 ----------------
+# Streamlit textarea는 기본적으로 TAB이 포커스 이동이라, JS로 들여쓰기 동작 주입.
+#   - TAB        : 커서 위치에 공백 4칸, 여러 줄 선택 시 줄마다 들여쓰기
+#   - Shift+TAB  : 들여쓰기 해제(앞쪽 공백 최대 4칸 제거)
+#   - 모든 동작은 execCommand("insertText")로 처리 → Ctrl+Z 실행취소 정상 동작
+_TAB_INDENT_JS = """
+<script>
+const INDENT = "    ";  // 공백 4칸
+const pdoc = window.parent.document;
+
+function replaceRange(ta, selStart, selEnd, text, finalStart, finalEnd) {
+    // 지정 범위를 선택한 뒤 insertText로 교체 — 브라우저 undo 스택에 기록되어
+    // Ctrl+Z 로 되돌릴 수 있고, input 이벤트도 자동 발생해 React가 값을 인지함.
+    ta.focus();
+    ta.selectionStart = selStart;
+    ta.selectionEnd = selEnd;
+    const ok = pdoc.execCommand("insertText", false, text);
+    if (!ok) {
+        // execCommand 미지원 환경 폴백 (이 경우 undo는 제한될 수 있음)
+        const setter = Object.getOwnPropertyDescriptor(
+            window.parent.HTMLTextAreaElement.prototype, "value").set;
+        const v = ta.value;
+        setter.call(ta, v.slice(0, selStart) + text + v.slice(selEnd));
+        ta.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    ta.selectionStart = finalStart;
+    ta.selectionEnd = finalEnd;
+}
+
+function onKeydown(e) {
+    if (e.key !== "Tab") return;
+    e.preventDefault();
+    const ta = e.target;
+    const val = ta.value;
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    const lineStart = val.lastIndexOf("\\n", start - 1) + 1;
+
+    // 단순 입력: 선택 없음 + TAB
+    if (start === end && !e.shiftKey) {
+        replaceRange(ta, start, end, INDENT,
+                     start + INDENT.length, start + INDENT.length);
+        return;
+    }
+
+    // 줄 단위 처리
+    const region = val.slice(lineStart, end);
+    const lines = region.split("\\n");
+
+    if (e.shiftKey) {
+        let firstDel = 0, totalDel = 0;
+        const newLines = lines.map((ln, i) => {
+            const m = ln.match(/^( {1,4}|\\t)/);
+            const removed = m ? m[0].length : 0;
+            if (i === 0) firstDel = removed;
+            totalDel += removed;
+            return removed ? ln.slice(removed) : ln;
+        });
+        if (totalDel === 0) return;  // 지울 들여쓰기 없음
+        replaceRange(ta, lineStart, end, newLines.join("\\n"),
+                     Math.max(lineStart, start - firstDel), end - totalDel);
+    } else {
+        const newLines = lines.map(ln => INDENT + ln);
+        replaceRange(ta, lineStart, end, newLines.join("\\n"),
+                     start + INDENT.length, end + INDENT.length * lines.length);
+    }
+}
+
+function attach() {
+    pdoc.querySelectorAll("textarea").forEach(ta => {
+        if (ta.dataset.tabIndentBound) return;
+        ta.dataset.tabIndentBound = "1";
+        ta.addEventListener("keydown", onKeydown);
+    });
+}
+attach();
+setInterval(attach, 800);  // 탭 전환 등으로 새로 생기는 textarea도 처리
+</script>
+"""
+
+
+def enable_tab_indent() -> None:
+    """편집용 textarea에서 TAB이 들여쓰기로 동작하도록 JS 주입."""
+    components.html(_TAB_INDENT_JS, height=0)
 
 
 # ---------------- secret/환경 변수 헬퍼 ----------------
@@ -416,6 +517,62 @@ def render_editor(backend: Backend, backend_key: str, relative: str, api_key: st
             st.info("H2(##) 헤더가 없어 목차 편집을 쓸 수 없습니다. 통합 편집 탭을 사용하세요.")
         else:
             sel_key = f"tocsel::{relative}"
+
+            # ---- 새 파트 추가 ----
+            with st.expander("➕ 새 파트 추가", expanded=False):
+                st.caption(
+                    "상위 그룹(##)을 고르고 제목을 입력하면 그 그룹 끝에 "
+                    "새 ### 파트가 생성됩니다. 생성 후 바로 편집할 수 있어요."
+                )
+                h2_choices = [
+                    i for i, s in enumerate(h2_sections) if not s.is_intro
+                ]
+                pa1, pa2 = st.columns([2, 3])
+                with pa1:
+                    new_h2_idx = st.selectbox(
+                        "상위 그룹 (##)",
+                        h2_choices,
+                        format_func=lambda i: h2_sections[i].title,
+                        key=f"newpart_h2::{relative}",
+                    )
+                with pa2:
+                    new_part_title = st.text_input(
+                        "새 파트 제목",
+                        placeholder="예: 환불 정책",
+                        key=f"newpart_title::{relative}",
+                    )
+                if st.button(
+                    "➕ 파트 생성", type="primary", key=f"newpart_btn::{relative}"
+                ):
+                    title = new_part_title.strip()
+                    if not title:
+                        st.error("새 파트 제목을 입력하세요.")
+                    else:
+                        target = h2_sections[new_h2_idx]
+                        base = target.full_text
+                        if not base.endswith("\n"):
+                            base += "\n"
+                        if not base.endswith("\n\n"):
+                            base += "\n"
+                        new_h2_text = base + f"### {title}\n\n\n"
+                        new_full = "".join(
+                            new_h2_text if k == new_h2_idx else s.full_text
+                            for k, s in enumerate(h2_sections)
+                        )
+                        # 새 파트의 인덱스 = 이 그룹의 기존 H3 개수
+                        old_subs = files.split_sections(
+                            target.full_text, level=3
+                        )
+                        _save_change(
+                            backend, relative, original, new_full,
+                            f"새 파트 추가: {title}", False, api_key,
+                        )
+                        st.session_state[sel_key] = (new_h2_idx, len(old_subs))
+                        st.session_state.pop(f"buf::{relative}", None)
+                        st.session_state.pop(f"newpart_title::{relative}", None)
+                        st.success(f"'{title}' 파트를 추가했습니다.")
+                        st.rerun()
+
             col_toc, col_edit = st.columns([2, 5], gap="medium")
 
             with col_toc:
@@ -546,6 +703,9 @@ def render_editor(backend: Backend, backend_key: str, relative: str, api_key: st
     if tab_store is not None:
         with tab_store:
             _render_store_add(backend, relative, original, regions, api_key)
+
+    # 편집용 textarea에서 TAB 들여쓰기 활성화
+    enable_tab_indent()
 
 
 # ---------------- 변경 로그 ----------------
