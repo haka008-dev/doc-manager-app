@@ -38,13 +38,27 @@ st.markdown(
     /* Pretendard Variable 로드 */
     @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css');
 
-    /* 전체 폰트 적용 */
-    html, body, [class*="st-"], [class*="css-"],
-    button, input, textarea, select, .stMarkdown, .stTextInput input {
+    /* 텍스트 요소에만 Pretendard 적용 — 아이콘 폰트(Material Symbols)는 제외 */
+    .stApp, .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5, .stApp h6,
+    .stApp p, .stApp button p, .stApp label, .stApp label p,
+    .stMarkdown, .stMarkdown p, .stMarkdown li, .stMarkdown span,
+    .stTextInput input, .stTextArea textarea,
+    [data-testid="stExpander"] summary p,
+    [data-testid="stCaptionContainer"] {
         font-family: 'Pretendard Variable', Pretendard, Arial,
                      -apple-system, BlinkMacSystemFont, system-ui,
                      'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic',
                      sans-serif !important;
+    }
+
+    /* Material Symbols 아이콘은 원래대로 — 화살표·X·체크 등이 글자로 안 보이게 */
+    .material-symbols-outlined,
+    .material-symbols-rounded,
+    [class*="material-symbols"],
+    span[class*="MaterialIcon"],
+    i[class*="material"] {
+        font-family: 'Material Symbols Outlined', 'Material Symbols Rounded',
+                     'Material Icons' !important;
     }
 
     /* 버튼(목차 항목 등) 컴팩트하게 */
