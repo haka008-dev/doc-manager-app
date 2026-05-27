@@ -1114,7 +1114,7 @@ def main():
         return
 
     # 5) 일반 사용자 UI — 좌(문서 + 버전 히스토리) / 우(편집기)
-    col_left, col_main = st.columns([2.5, 7.5], gap="medium")
+    col_left, col_main = st.columns([2, 8], gap="medium")
 
     with col_left:
         st.subheader("문서")
