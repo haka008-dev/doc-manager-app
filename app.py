@@ -25,14 +25,28 @@ DEFAULT_LOCAL_DOCS_PATH = r"C:\Users\user\Desktop\챗봇"
 
 st.set_page_config(
     page_title="챗봇 문서 관리기",
-    page_icon="📚",
+    page_icon="💚",
     layout="wide",
 )
 
-# 버튼을 살짝 컴팩트하게 — 목차 항목이 두 줄로 늘어나지 않도록
+# 폰트 + UI 미세 조정 CSS.
+# 1) Pretendard Variable 로드(CDN) → 폴백 Arial → 시스템 한글 폰트
+# 2) 버튼·expander·textarea 컴팩트 스타일
 st.markdown(
     """
     <style>
+    /* Pretendard Variable 로드 */
+    @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css');
+
+    /* 전체 폰트 적용 */
+    html, body, [class*="st-"], [class*="css-"],
+    button, input, textarea, select, .stMarkdown, .stTextInput input {
+        font-family: 'Pretendard Variable', Pretendard, Arial,
+                     -apple-system, BlinkMacSystemFont, system-ui,
+                     'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic',
+                     sans-serif !important;
+    }
+
     /* 버튼(목차 항목 등) 컴팩트하게 */
     .stButton button { padding: 0.16rem 0.5rem; line-height: 1.25; min-height: 0; }
     .stButton button p {
@@ -216,7 +230,7 @@ def _render_bootstrap_page(backend: Backend) -> None:
     """첫 사용자가 없을 때 — 기존 APP_PASSWORD를 일회용 키로 써서 admin 생성."""
     setup_secret = _secret("APP_PASSWORD")
 
-    st.title("🔧 초기 관리자 계정 설정")
+    st.title("초기 관리자 계정 설정")
 
     if not setup_secret:
         st.error(
@@ -266,7 +280,7 @@ def _render_bootstrap_page(backend: Backend) -> None:
 
 
 def _render_login_page(backend: Backend, users: list[auth.User]) -> None:
-    st.title("🔒 챗봇 문서 관리기")
+    st.title("챗봇 문서 관리기")
 
     state = _auth_state()
     now = time.time()
@@ -329,7 +343,7 @@ def build_backend() -> tuple[Backend, str]:
 
     if gh_token and gh_repo:
         backend = _get_github_backend(gh_token, gh_repo, gh_branch, gh_prefix)
-        label = f"🐙 GitHub · {gh_repo}@{gh_branch}"
+        label = f"GitHub · {gh_repo}@{gh_branch}"
         if gh_prefix:
             label += f"/{gh_prefix}"
         return backend, label
@@ -340,7 +354,7 @@ def build_backend() -> tuple[Backend, str]:
     )
     local_root = Path(local_path_str)
     backend = LocalBackend(local_root)
-    label = f"📁 로컬 · {local_root}"
+    label = f"로컬 · {local_root}"
     return backend, label
 
 
@@ -372,12 +386,12 @@ def backend_cache_key(label: str) -> str:
 
 # ---------------- 사이드바 ----------------
 def render_sidebar(backend_label: str, user: auth.User) -> str:
-    st.sidebar.header("⚙️ 설정")
+    st.sidebar.header("설정")
     st.sidebar.markdown(f"**저장소:** {backend_label}")
-    role_badge = "👑 admin" if user.is_admin else "✏️ editor"
-    st.sidebar.markdown(f"**로그인:** 👤 {user.name} · {role_badge}")
+    role_badge = "admin" if user.is_admin else "editor"
+    st.sidebar.markdown(f"**로그인:** {user.name} · {role_badge}")
 
-    if backend_label.startswith("📁"):
+    if backend_label.startswith("로컬"):
         # 로컬 모드만 폴더 변경 가능
         local_path = st.sidebar.text_input(
             "로컬 문서 폴더",
@@ -386,7 +400,7 @@ def render_sidebar(backend_label: str, user: auth.User) -> str:
         st.session_state["local_docs_path"] = local_path
 
     st.sidebar.divider()
-    st.sidebar.subheader("🤖 Claude API")
+    st.sidebar.subheader("Claude API")
     api_key = st.sidebar.text_input(
         "API 키 (선택)",
         value=_secret("ANTHROPIC_API_KEY", ""),
@@ -395,17 +409,17 @@ def render_sidebar(backend_label: str, user: auth.User) -> str:
     )
 
     st.sidebar.divider()
-    if st.sidebar.button("🔄 새로고침 (캐시 비우기)", use_container_width=True):
+    if st.sidebar.button("새로고침 (캐시 비우기)", use_container_width=True):
         invalidate_cache()
         st.rerun()
 
     # 관리자만 보이는 사용자 관리 페이지 진입 버튼
     if user.is_admin:
-        if st.sidebar.button("👥 사용자 관리", use_container_width=True):
+        if st.sidebar.button("사용자 관리", use_container_width=True):
             st.session_state["show_admin"] = True
             st.rerun()
 
-    if st.sidebar.button("🚪 로그아웃", use_container_width=True):
+    if st.sidebar.button("로그아웃", use_container_width=True):
         st.session_state.pop("user", None)
         st.session_state.pop("show_admin", None)
         st.rerun()
@@ -420,7 +434,7 @@ def render_file_list(backend_key: str) -> str | None:
         st.info("이 저장소에서 .md 파일을 찾지 못했습니다.")
         return None
 
-    query = st.text_input("🔍 파일 검색", placeholder="파일명 또는 경로...", key="search")
+    query = st.text_input("파일 검색", placeholder="파일명 또는 경로...", key="search")
     if query:
         ql = query.lower()
         filtered = [f for f in md_files if ql in f["relative"].lower()]
@@ -444,7 +458,7 @@ def render_file_list(backend_key: str) -> str | None:
     for f in filtered:
         if f["relative"] == selected:
             ts = f["modified"][:19].replace("T", " ")
-            st.caption(f"📅 {ts} · {f['size']:,} bytes")
+            st.caption(f"{ts} · {f['size']:,} bytes")
             return f["relative"]
     return None
 
@@ -507,7 +521,7 @@ def _render_store_add(backend, relative, original, regions, api_key, user):
     hours = st.text_input("운영시간", value="11:00 ~ 21:00", key=f"sthours::{relative}")
     note = st.text_input("특이사항 (선택)", key=f"stnote::{relative}")
 
-    if st.button("🏪 이 구역에 매장 추가", type="primary", key=f"staddbtn::{relative}"):
+    if st.button("이 구역에 매장 추가", type="primary", key=f"staddbtn::{relative}"):
         if not (name.strip() and addr.strip() and phone.strip() and hours.strip()):
             st.error("매장명·주소지·연락처·운영시간은 필수 입력입니다.")
         else:
@@ -533,10 +547,10 @@ def render_editor(backend: Backend, backend_key: str, relative: str,
 
     header_cols = st.columns([5, 2])
     with header_cols[0]:
-        st.subheader(f"📄 {relative}")
+        st.subheader(f"{relative}")
     with header_cols[1]:
         st.download_button(
-            "📥 통합 .md 다운로드",
+            "통합 .md 다운로드",
             data=original,
             file_name=file_name,
             mime="text/markdown",
@@ -545,9 +559,9 @@ def render_editor(backend: Backend, backend_key: str, relative: str,
         )
 
     regions = files.parse_store_regions(original)
-    _tab_names = ["✏️ 통합 편집", "🧩 파트별 편집", "👀 미리보기", "🗂 목차"]
+    _tab_names = ["통합 편집", "파트별 편집", "미리보기", "목차"]
     if regions:
-        _tab_names.append("🏪 매장 추가")
+        _tab_names.append("매장 추가")
     _tabs = st.tabs(_tab_names)
     tab_whole, tab_parts, tab_preview, tab_outline = _tabs[:4]
     tab_store = _tabs[4] if regions else None
@@ -583,7 +597,7 @@ def render_editor(backend: Backend, backend_key: str, relative: str,
         with col3:
             st.write("")
             save_btn = st.button(
-                "💾 저장" if is_dirty else "💾 변경 없음",
+                "저장" if is_dirty else "변경 없음",
                 disabled=not is_dirty,
                 type="primary" if is_dirty else "secondary",
                 use_container_width=True,
@@ -598,7 +612,7 @@ def render_editor(backend: Backend, backend_key: str, relative: str,
             e = result["entry"]
             st.success(f"저장 완료 · +{e['added']} / -{e['removed']} 줄")
             if result["ai_summary"]:
-                st.info(f"🤖 {result['ai_summary']}")
+                st.info(result["ai_summary"])
             st.session_state.pop(buf_key, None)
             st.rerun()
 
@@ -613,7 +627,7 @@ def render_editor(backend: Backend, backend_key: str, relative: str,
             sel_key = f"tocsel::{relative}"
 
             # ---- 새 파트 추가 ----
-            with st.expander("➕ 새 파트 추가", expanded=False):
+            with st.expander("새 파트 추가", expanded=False):
                 st.caption(
                     "상위 그룹(##)을 고르고 제목을 입력하면 그 그룹 끝에 "
                     "새 ### 파트가 생성됩니다. 생성 후 바로 편집할 수 있어요."
@@ -636,7 +650,7 @@ def render_editor(backend: Backend, backend_key: str, relative: str,
                         key=f"newpart_title::{relative}",
                     )
                 if st.button(
-                    "➕ 파트 생성", type="primary", key=f"newpart_btn::{relative}"
+                    "파트 생성", type="primary", key=f"newpart_btn::{relative}"
                 ):
                     title = new_part_title.strip()
                     if not title:
@@ -672,7 +686,7 @@ def render_editor(backend: Backend, backend_key: str, relative: str,
             with col_toc:
                 query = st.text_input(
                     "목차 검색",
-                    placeholder="🔍 항목 검색...",
+                    placeholder="항목 검색...",
                     key=f"tocq::{relative}",
                     label_visibility="collapsed",
                 )
@@ -753,7 +767,7 @@ def render_editor(backend: Backend, backend_key: str, relative: str,
                             )
                         with ec3:
                             save_part = st.button(
-                                "💾 저장" if part_dirty else "변경 없음",
+                                "저장" if part_dirty else "변경 없음",
                                 disabled=not part_dirty,
                                 type="primary" if part_dirty else "secondary",
                                 use_container_width=True,
@@ -779,7 +793,7 @@ def render_editor(backend: Backend, backend_key: str, relative: str,
                                 f"+{e['added']} / -{e['removed']} 줄"
                             )
                             if result["ai_summary"]:
-                                st.info(f"🤖 {result['ai_summary']}")
+                                st.info(result["ai_summary"])
                             st.session_state.pop(f"buf::{relative}", None)
                             st.rerun()
 
@@ -826,7 +840,7 @@ _KST = timezone(timedelta(hours=9))
 
 def render_version_history(backend: Backend, backend_key: str,
                            relative: str | None, user: auth.User):
-    st.subheader("📜 버전 히스토리")
+    st.subheader("버전 히스토리")
     if relative is None:
         st.caption("파일을 선택하세요.")
         return
@@ -849,7 +863,7 @@ def render_version_history(backend: Backend, backend_key: str,
             label = str(c.get("date", ""))[:16]
         msg = (c.get("message") or "").split("\n")[0].strip()
         is_latest = i == 0
-        title = ("🟢 " if is_latest else "🕘 ") + label
+        title = ("[최신] " if is_latest else "") + label
         if msg:
             title += f" · {msg}"
         with st.expander(title, expanded=False):
@@ -860,7 +874,7 @@ def render_version_history(backend: Backend, backend_key: str,
                 st.caption("(이 버전의 변경 내역을 표시할 수 없습니다)")
             if not is_latest:
                 if st.button(
-                    "⤺ 이 버전으로 되돌리기",
+                    "이 버전으로 되돌리기",
                     use_container_width=True,
                     key=f"vrev::{relative}::{sha}",
                 ):
@@ -883,7 +897,7 @@ def render_version_history(backend: Backend, backend_key: str,
 
 # ---------------- AI 검토 ----------------
 def render_ai_review(backend: Backend, backend_key: str, relative: str, api_key: str):
-    st.subheader("🤖 AI 문서 검토")
+    st.subheader("AI 문서 검토")
     if not api_key:
         st.caption("사이드바에서 Claude API 키를 입력하면 사용할 수 있습니다.")
         return
@@ -907,7 +921,7 @@ def render_admin_page(backend: Backend, cur_user: auth.User) -> None:
         st.error("관리자만 접근할 수 있는 페이지입니다.")
         return
 
-    st.subheader("👥 사용자 관리")
+    st.subheader("사용자 관리")
     st.caption("사용자를 추가/삭제하거나 비밀번호·역할을 변경할 수 있습니다.")
 
     users = auth.load_users(backend)
@@ -968,7 +982,7 @@ def render_admin_page(backend: Backend, cur_user: auth.User) -> None:
 
                 # 삭제
                 if st.button(
-                    "🗑 이 사용자 삭제",
+                    "이 사용자 삭제",
                     key=f"del_btn_{u.id}",
                     help="삭제된 사용자는 더 이상 로그인할 수 없습니다.",
                 ):
@@ -998,7 +1012,7 @@ def render_admin_page(backend: Backend, cur_user: auth.User) -> None:
                 placeholder="최소 8자 (사용자에게 전달)",
             )
 
-        if st.form_submit_button("➕ 사용자 추가", type="primary"):
+        if st.form_submit_button("사용자 추가", type="primary"):
             err = auth.validate_user_id(new_id) or auth.validate_password(new_pw)
             if err:
                 st.error(err)
@@ -1014,7 +1028,7 @@ def render_admin_page(backend: Backend, cur_user: auth.User) -> None:
                     commit_message=f"add user: {new_user.id}",
                 )
                 st.success(
-                    f"✅ {new_user.name}({new_user.id}) 추가됨. "
+                    f"{new_user.name}({new_user.id}) 추가됨. "
                     "임시 비밀번호를 본인에게 전달해 주세요."
                 )
                 st.rerun()
@@ -1036,22 +1050,22 @@ def main():
     api_key = render_sidebar(backend_label, user)
     backend_key = backend_cache_key(backend_label)
 
-    st.title("📚 챗봇 문서 관리기")
+    st.title("챗봇 문서 관리기")
     st.caption(backend_label)
 
     # 4) 관리자 페이지 라우팅
     if st.session_state.get("show_admin"):
-        if st.button("◀ 메인으로 돌아가기"):
+        if st.button("메인으로 돌아가기"):
             st.session_state.pop("show_admin", None)
             st.rerun()
         render_admin_page(backend, user)
         return
 
     # 5) 일반 사용자 UI
-    col_files, col_main, col_log = st.columns([2, 6, 2], gap="medium")
+    col_files, col_main, col_log = st.columns([2, 7, 1.5], gap="medium")
 
     with col_files:
-        st.subheader("📁 문서")
+        st.subheader("문서")
         selected_relative = render_file_list(backend_key)
 
     with col_main:

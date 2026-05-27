@@ -1,0 +1,7 @@
+# Streamlit 앱 테마 설정.
+# 기본값을 다크모드로 두고, 사용자가 햄버거 메뉴 > Settings 에서
+# 라이트 모드로 전환 가능.
+
+[theme]
+base = "dark"
+primaryColor = "#00ACA3"
