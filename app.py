@@ -179,6 +179,38 @@ def enable_tab_indent() -> None:
     components.html(_TAB_INDENT_JS, height=0)
 
 
+# ---------------- Streamlit 단축키 비활성화 ----------------
+# Streamlit이 단일 키(c=clear cache, r=rerun 등)를 단축키로 가로채는데,
+# 외부 캡처 도구 등과 충돌하므로 입력 필드 외부의 단일 키 입력은 차단.
+_DISABLE_KEYS_JS = """
+<script>
+(function() {
+    const pdoc = window.parent.document;
+    if (pdoc._haka_shortcuts_disabled) return;
+    pdoc._haka_shortcuts_disabled = true;
+    pdoc.addEventListener('keydown', function(e) {
+        // 조합키(Ctrl/Cmd/Alt/Shift)가 눌리면 통과 — 정상 단축키 동작
+        if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+        // 단일 문자 키(a-z, 0-9, 기호 등)만 차단
+        if (!e.key || e.key.length !== 1) return;
+        // 입력 요소 안에서 타이핑은 허용
+        const tag = e.target.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target.isContentEditable) {
+            return;
+        }
+        // Streamlit 핸들러로 가기 전에 차단 (캡처 단계)
+        e.stopPropagation();
+    }, true);
+})();
+</script>
+"""
+
+
+def disable_streamlit_shortcuts() -> None:
+    """Streamlit의 단일 키 단축키를 비활성화 (외부 캡처 도구 충돌 방지)."""
+    components.html(_DISABLE_KEYS_JS, height=0)
+
+
 # ---------------- secret/환경 변수 헬퍼 ----------------
 def _secret(key: str, default: str = "") -> str:
     """st.secrets에서 먼저 찾고 없으면 환경 변수에서. 둘 다 없으면 default."""
@@ -1050,6 +1082,9 @@ def render_admin_page(backend: Backend, cur_user: auth.User) -> None:
 
 # ---------------- 메인 ----------------
 def main():
+    # 0) Streamlit 단일 키 단축키 비활성화 (외부 캡처 도구 등 충돌 방지)
+    disable_streamlit_shortcuts()
+
     # 1) 백엔드 먼저 구성 (사용자 데이터 읽기에 필요)
     try:
         backend, backend_label = build_backend()
