@@ -61,6 +61,79 @@ st.markdown(
                      'Material Icons' !important;
     }
 
+    /* ===== 전체 정돈 ===== */
+    /* 페이지 상단 여백 줄이기 */
+    .main .block-container,
+    [data-testid="stMain"] .block-container {
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+    }
+    /* 메인 타이틀 — 살짝 컴팩트하게 */
+    .main h1 {
+        font-size: 1.55rem;
+        font-weight: 700;
+        margin-bottom: 0.3rem;
+        letter-spacing: -0.01em;
+    }
+    /* subheader (h3) 톤다운 — 너무 진하지 않게 */
+    .main h3 {
+        font-size: 1.05rem;
+        font-weight: 600;
+        margin-top: 0.4rem;
+        margin-bottom: 0.4rem;
+        color: rgba(250, 250, 250, 0.92);
+    }
+    /* 사이드바 헤더 컴팩트 */
+    [data-testid="stSidebar"] h2 {
+        font-size: 1rem;
+        margin: 0.4rem 0 0.3rem 0;
+    }
+    [data-testid="stSidebar"] h3 {
+        font-size: 0.92rem;
+        margin: 0.4rem 0 0.2rem 0;
+    }
+    /* expander 카드 — 부드러운 테두리 */
+    [data-testid="stExpander"] details {
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.02);
+    }
+    /* divider 톤다운 */
+    [data-testid="stMain"] hr,
+    .main hr {
+        margin: 0.7rem 0;
+        border-color: rgba(255, 255, 255, 0.07);
+    }
+    /* caption 가독성 일관화 */
+    [data-testid="stCaptionContainer"] {
+        color: rgba(250, 250, 250, 0.58);
+    }
+    /* 버튼 — 둥근 모서리 + 부드러운 hover */
+    .stButton button {
+        border-radius: 6px;
+        transition: background 0.15s ease, border-color 0.15s ease,
+                    color 0.15s ease, transform 0.05s ease;
+    }
+    .stButton button:active {
+        transform: translateY(1px);
+    }
+    /* 라디오(파일 선택) 컴팩트 */
+    [data-testid="stRadio"] label {
+        padding: 0.18rem 0;
+    }
+    /* 텍스트 인풋 — 둥근 모서리 통일 */
+    .stTextInput input, .stTextArea textarea {
+        border-radius: 6px;
+    }
+    /* 탭 헤더 — 깔끔하게 */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 0.4rem;
+    }
+    .stTabs [data-baseweb="tab"] {
+        font-size: 0.92rem;
+        padding: 0.4rem 0.8rem;
+    }
+
     /* 버튼(목차 항목 등) 컴팩트하게 */
     .stButton button { padding: 0.16rem 0.5rem; line-height: 1.25; min-height: 0; }
     .stButton button p {
@@ -276,99 +349,108 @@ def _render_bootstrap_page(backend: Backend) -> None:
     """첫 사용자가 없을 때 — 기존 APP_PASSWORD를 일회용 키로 써서 admin 생성."""
     setup_secret = _secret("APP_PASSWORD")
 
-    st.title("초기 관리자 계정 설정")
-
+    # 가운데 정렬 (양쪽 여백)
+    _, mid, _ = st.columns([1, 2, 1])
     if not setup_secret:
-        st.error(
-            "초기 설정용 `APP_PASSWORD`가 secrets에 없습니다. "
-            "Streamlit Cloud > Settings > Secrets에서 `APP_PASSWORD` 값을 "
-            "임시로 설정한 뒤 이 화면에서 사용한 다음 제거하세요."
-        )
+        with mid:
+            st.title("초기 관리자 계정 설정")
+            st.error(
+                "초기 설정용 `APP_PASSWORD`가 secrets에 없습니다. "
+                "Streamlit Cloud > Settings > Secrets에서 `APP_PASSWORD` 값을 "
+                "임시로 설정한 뒤 이 화면에서 사용한 다음 제거하세요."
+            )
         return
 
-    st.markdown(
-        "아직 등록된 사용자가 없습니다. 첫 **관리자 계정**을 만들어주세요. "
-        "이후엔 이 화면이 더 이상 나타나지 않습니다."
-    )
-    st.caption("초기 설정 비밀번호는 기존 앱 비밀번호(`APP_PASSWORD`)와 같습니다.")
+    with mid:
+        st.title("초기 관리자 계정 설정")
+        st.markdown(
+            "아직 등록된 사용자가 없습니다. 첫 **관리자 계정**을 만들어주세요. "
+            "이후엔 이 화면이 더 이상 나타나지 않습니다."
+        )
+        st.caption("초기 설정 비밀번호는 기존 앱 비밀번호(`APP_PASSWORD`)와 같습니다.")
 
-    setup_pw = st.text_input("초기 설정 비밀번호 (APP_PASSWORD)", type="password")
-    col1, col2 = st.columns(2)
-    with col1:
-        new_id = st.text_input("관리자 아이디", placeholder="영문/숫자/_, 2-32자")
-    with col2:
-        new_name = st.text_input("이름", placeholder="화면 표시명 (예: 김매니저)")
-    new_pw = st.text_input("새 비밀번호", type="password", placeholder="최소 8자")
-    new_pw2 = st.text_input("새 비밀번호 확인", type="password")
+        setup_pw = st.text_input("초기 설정 비밀번호 (APP_PASSWORD)", type="password")
+        col1, col2 = st.columns(2)
+        with col1:
+            new_id = st.text_input("관리자 아이디", placeholder="영문/숫자/_, 2-32자")
+        with col2:
+            new_name = st.text_input("이름", placeholder="화면 표시명 (예: 김매니저)")
+        new_pw = st.text_input("새 비밀번호", type="password", placeholder="최소 8자")
+        new_pw2 = st.text_input("새 비밀번호 확인", type="password")
 
-    if st.button("관리자 계정 만들기", type="primary"):
-        if not hmac.compare_digest(
-            setup_pw.encode("utf-8"), setup_secret.encode("utf-8")
-        ):
-            st.error("초기 설정 비밀번호가 일치하지 않습니다.")
-            return
-        err = auth.validate_user_id(new_id) or auth.validate_password(new_pw)
-        if err:
-            st.error(err)
-            return
-        if not new_name.strip():
-            st.error("이름을 입력하세요.")
-            return
-        if new_pw != new_pw2:
-            st.error("비밀번호가 일치하지 않습니다.")
-            return
-        admin = auth.make_user(new_id, new_name, new_pw, auth.ROLE_ADMIN)
-        auth.save_users(backend, [admin],
-                        commit_message=f"bootstrap admin user: {admin.id}")
-        st.session_state["user"] = admin
-        st.success(f"{admin.name} 관리자 계정 생성 완료. 메인 화면으로 이동합니다.")
-        st.rerun()
+        if st.button("관리자 계정 만들기", type="primary"):
+            if not hmac.compare_digest(
+                setup_pw.encode("utf-8"), setup_secret.encode("utf-8")
+            ):
+                st.error("초기 설정 비밀번호가 일치하지 않습니다.")
+                return
+            err = auth.validate_user_id(new_id) or auth.validate_password(new_pw)
+            if err:
+                st.error(err)
+                return
+            if not new_name.strip():
+                st.error("이름을 입력하세요.")
+                return
+            if new_pw != new_pw2:
+                st.error("비밀번호가 일치하지 않습니다.")
+                return
+            admin = auth.make_user(new_id, new_name, new_pw, auth.ROLE_ADMIN)
+            auth.save_users(backend, [admin],
+                            commit_message=f"bootstrap admin user: {admin.id}")
+            st.session_state["user"] = admin
+            st.success(f"{admin.name} 관리자 계정 생성 완료. 메인 화면으로 이동합니다.")
+            st.rerun()
 
 
 def _render_login_page(backend: Backend, users: list[auth.User]) -> None:
-    st.title("챗봇 문서 관리기")
+    # 가운데 정렬 (양쪽 여백)
+    _, mid, _ = st.columns([1, 2, 1])
+    with mid:
+        st.title("챗봇 문서 관리기")
+        st.caption("아이디와 비밀번호를 입력하세요.")
 
-    state = _auth_state()
-    now = time.time()
+        state = _auth_state()
+        now = time.time()
 
-    user_id = st.text_input("아이디", key="login_id_input")
-    pw = st.text_input("비밀번호", type="password", key="login_pw_input")
+        user_id = st.text_input("아이디", key="login_id_input")
+        pw = st.text_input("비밀번호", type="password", key="login_pw_input")
 
-    # 입력된 ID가 잠금 상태면 시도 자체를 막음
-    if user_id:
-        remaining = state["locked_until"].get(user_id, 0) - now
-        if remaining > 0:
-            mins = int(remaining // 60) + 1
-            st.error(
-                f"이 아이디는 비밀번호를 여러 번 틀려 잠겼습니다. "
-                f"약 {mins}분 후 다시 시도하세요."
-            )
-            return
+        # 입력된 ID가 잠금 상태면 시도 자체를 막음
+        if user_id:
+            remaining = state["locked_until"].get(user_id, 0) - now
+            if remaining > 0:
+                mins = int(remaining // 60) + 1
+                st.error(
+                    f"이 아이디는 비밀번호를 여러 번 틀려 잠겼습니다. "
+                    f"약 {mins}분 후 다시 시도하세요."
+                )
+                return
 
-    if st.button("로그인", type="primary"):
-        if not user_id or not pw:
-            st.warning("아이디와 비밀번호를 입력하세요.")
-            return
-        user = auth.find_user(users, user_id)
-        if user and auth.verify_password(pw, user.password_hash):
-            state["fail_counts"].pop(user_id, None)
-            st.session_state["user"] = user
-            st.rerun()
-        else:
-            fc = state["fail_counts"].get(user_id, 0) + 1
-            state["fail_counts"][user_id] = fc
-            left = MAX_ATTEMPTS - fc
-            if left <= 0:
-                state["locked_until"][user_id] = now + LOCKOUT_SECONDS
+        if st.button("로그인", type="primary"):
+            if not user_id or not pw:
+                st.warning("아이디와 비밀번호를 입력하세요.")
+                return
+            user = auth.find_user(users, user_id)
+            if user and auth.verify_password(pw, user.password_hash):
                 state["fail_counts"].pop(user_id, None)
-                st.error(
-                    f"비밀번호를 {MAX_ATTEMPTS}회 틀렸습니다. "
-                    f"이 아이디는 {LOCKOUT_SECONDS // 60}분간 잠깁니다."
-                )
+                st.session_state["user"] = user
+                st.rerun()
             else:
-                st.error(
-                    f"아이디 또는 비밀번호가 일치하지 않습니다. (남은 시도: {left}회)"
-                )
+                fc = state["fail_counts"].get(user_id, 0) + 1
+                state["fail_counts"][user_id] = fc
+                left = MAX_ATTEMPTS - fc
+                if left <= 0:
+                    state["locked_until"][user_id] = now + LOCKOUT_SECONDS
+                    state["fail_counts"].pop(user_id, None)
+                    st.error(
+                        f"비밀번호를 {MAX_ATTEMPTS}회 틀렸습니다. "
+                        f"이 아이디는 {LOCKOUT_SECONDS // 60}분간 잠깁니다."
+                    )
+                else:
+                    st.error(
+                        f"아이디 또는 비밀번호가 일치하지 않습니다. "
+                        f"(남은 시도: {left}회)"
+                    )
 
 
 # ---------------- 백엔드 선택 ----------------
@@ -1103,7 +1185,6 @@ def main():
     backend_key = backend_cache_key(backend_label)
 
     st.title("챗봇 문서 관리기")
-    st.caption(backend_label)
 
     # 4) 관리자 페이지 라우팅
     if st.session_state.get("show_admin"):
