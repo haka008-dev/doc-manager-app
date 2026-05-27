@@ -884,11 +884,11 @@ def cached_read_at_commit(backend_key: str, relative: str, sha: str) -> str:
 _KST = timezone(timedelta(hours=9))
 
 
-def render_version_list_compact(backend_key: str, relative: str | None):
-    """좌측 패널용 버전 히스토리 — 클릭 가능한 목록만.
+def render_version_history(backend: Backend, backend_key: str,
+                           relative: str | None, user: auth.User):
+    """좌측 패널의 버전 히스토리 — 각 버전이 카드형 expander.
 
-    클릭 시 session_state['viewing_version']에 SHA 저장 → main()이
-    감지해서 우측에 상세 페이지를 렌더링.
+    클릭하면 그 자리에서 펼쳐져 diff·되돌리기 버튼 표시.
     """
     if relative is None:
         st.caption("먼저 파일을 선택하세요.")
@@ -896,116 +896,52 @@ def render_version_list_compact(backend_key: str, relative: str | None):
 
     commits = cached_list_commits(backend_key, relative)
     if not commits:
-        st.caption("저장 기록이 아직 없습니다.")
+        st.caption(
+            "저장 기록이 아직 없습니다. (로컬 폴더 모드는 미지원 — "
+            "GitHub 모드에서만 동작)"
+        )
         return
 
-    st.caption(f"최근 {len(commits)}개 버전 · 최신순 (클릭해서 보기)")
-
-    cur_viewing = st.session_state.get("viewing_version")
+    st.caption(f"최근 {len(commits)}개 버전 · 최신순")
 
     for i, c in enumerate(commits):
         sha = c["sha"]
         try:
-            label = c["date"].astimezone(_KST).strftime("%m/%d %H:%M")
+            label = c["date"].astimezone(_KST).strftime("%Y-%m-%d %H:%M")
         except Exception:
-            label = str(c.get("date", ""))[:11]
+            label = str(c.get("date", ""))[:16]
         msg = (c.get("message") or "").split("\n")[0].strip()
         is_latest = i == 0
-        prefix = "[최신] " if is_latest else ""
-
-        # 버튼 라벨 (CSS로 자동 ellipsis)
-        btn_label = f"{prefix}{label} · {msg}" if msg else f"{prefix}{label}"
-        is_selected = cur_viewing == sha
-
-        if st.button(
-            btn_label,
-            key=f"verlist::{relative}::{sha}",
-            help=f"{label} · {msg}",
-            use_container_width=True,
-            type="primary" if is_selected else "secondary",
-        ):
-            st.session_state["viewing_version"] = sha
-            st.rerun()
-
-
-def render_version_detail(backend: Backend, backend_key: str,
-                          relative: str, sha: str, user: auth.User):
-    """버전 상세 페이지 — 메인 영역에 전체 표시.
-
-    탭: 변경 사항(diff) / 전체 내용. 되돌리기 버튼 포함.
-    """
-    # 상단: 돌아가기 + 제목
-    col_back, col_title = st.columns([1.5, 6])
-    with col_back:
-        if st.button("← 편집기로 돌아가기", use_container_width=True):
-            st.session_state.pop("viewing_version", None)
-            st.rerun()
-    with col_title:
-        st.subheader(f"버전 상세 · {relative}")
-
-    # 해당 커밋 메타 정보
-    commits = cached_list_commits(backend_key, relative)
-    current = next((c for c in commits if c["sha"] == sha), None)
-    if not current:
-        st.error("이 버전을 찾을 수 없습니다. 목록이 갱신됐을 수 있어요.")
-        return
-
-    try:
-        date_str = current["date"].astimezone(_KST).strftime("%Y-%m-%d %H:%M:%S")
-    except Exception:
-        date_str = str(current.get("date", ""))
-    msg = (current.get("message") or "").strip()
-    is_latest = commits[0]["sha"] == sha
-
-    # 메타 카드
-    meta_lines = [f"**시각:** {date_str}", f"**SHA:** `{sha[:8]}...`"]
-    if is_latest:
-        meta_lines.append("**상태:** 최신")
-    st.markdown("  \n".join(meta_lines))
-    if msg:
-        with st.container(border=True):
-            st.markdown(f"**커밋 메시지**\n\n{msg}")
-
-    st.divider()
-
-    # 변경 사항 (diff) / 전체 내용 탭
-    tab_diff, tab_full = st.tabs(["변경 사항 (diff)", "이 버전의 전체 내용"])
-
-    with tab_diff:
-        diff = cached_commit_diff(backend_key, relative, sha)
-        if diff:
-            st.code(diff, language="diff")
-        else:
-            st.caption("이 버전의 변경 내역을 표시할 수 없습니다.")
-
-    with tab_full:
-        try:
-            content = cached_read_at_commit(backend_key, relative, sha)
-            st.markdown(content)
-        except Exception as exc:
-            st.error(f"버전 내용을 불러오지 못했습니다: {exc}")
-
-    # 되돌리기 (최신이 아닐 때만)
-    if not is_latest:
-        st.divider()
-        if st.button(
-            "이 버전으로 되돌리기", type="primary",
-            key=f"revert::{relative}::{sha}",
-        ):
-            try:
-                old_content = cached_read_at_commit(backend_key, relative, sha)
-            except Exception as exc:
-                st.error(f"버전을 불러오지 못했습니다: {exc}")
+        title = ("[최신] " if is_latest else "") + label
+        if msg:
+            title += f" · {msg}"
+        with st.expander(title, expanded=False):
+            diff = cached_commit_diff(backend_key, relative, sha)
+            if diff:
+                st.code(diff, language="diff")
             else:
-                cur = cached_read(backend_key, relative)
-                _save_change(
-                    backend, relative, cur, old_content,
-                    f"{date_str[:16]} 버전으로 되돌림", False, "", user,
-                )
-                st.session_state.pop(f"buf::{relative}", None)
-                st.session_state.pop("viewing_version", None)
-                st.success(f"{date_str[:16]} 버전으로 되돌렸습니다.")
-                st.rerun()
+                st.caption("(이 버전의 변경 내역을 표시할 수 없습니다)")
+            if not is_latest:
+                if st.button(
+                    "이 버전으로 되돌리기",
+                    use_container_width=True,
+                    key=f"vrev::{relative}::{sha}",
+                ):
+                    try:
+                        old_content = cached_read_at_commit(
+                            backend_key, relative, sha
+                        )
+                    except Exception as exc:
+                        st.error(f"버전을 불러오지 못했습니다: {exc}")
+                    else:
+                        cur = cached_read(backend_key, relative)
+                        _save_change(
+                            backend, relative, cur, old_content,
+                            f"{label} 버전으로 되돌림", False, "", user,
+                        )
+                        st.session_state.pop(f"buf::{relative}", None)
+                        st.success(f"{label} 버전으로 되돌렸습니다.")
+                        st.rerun()
 
 
 # ---------------- AI 검토 ----------------
@@ -1177,34 +1113,21 @@ def main():
         render_admin_page(backend, user)
         return
 
-    # 5) 일반 사용자 UI — 좌(문서 + 버전 히스토리) / 우(편집기 또는 버전 상세)
+    # 5) 일반 사용자 UI — 좌(문서 + 버전 히스토리) / 우(편집기)
     col_left, col_main = st.columns([2.5, 7.5], gap="medium")
 
     with col_left:
         st.subheader("문서")
         selected_relative = render_file_list(backend_key)
 
-        # 파일이 바뀌면 다른 파일의 버전 상세는 자동으로 닫음
-        prev_file = st.session_state.get("_last_selected_file")
-        if selected_relative != prev_file:
-            st.session_state.pop("viewing_version", None)
-            st.session_state["_last_selected_file"] = selected_relative
-
         st.divider()
-        with st.expander("버전 히스토리", expanded=True):
-            render_version_list_compact(backend_key, selected_relative)
+        st.subheader("버전 히스토리")
+        render_version_history(backend, backend_key, selected_relative, user)
 
     with col_main:
         if selected_relative is None:
             st.info("좌측에서 파일을 선택하세요.")
-        elif st.session_state.get("viewing_version"):
-            # 버전 상세 페이지 (전체 영역 차지)
-            render_version_detail(
-                backend, backend_key, selected_relative,
-                st.session_state["viewing_version"], user,
-            )
         else:
-            # 평소 편집기
             render_editor(backend, backend_key, selected_relative, api_key, user)
             st.divider()
             render_ai_review(backend, backend_key, selected_relative, api_key)
