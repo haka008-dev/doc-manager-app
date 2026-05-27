@@ -134,6 +134,36 @@ st.markdown(
         padding: 0.4rem 0.8rem;
     }
 
+    /* 미리보기(stMarkdown 본문) — 마크다운 헤더 크기 축소 + 간격 조정 */
+    .stMarkdown h1 {
+        font-size: 1.5rem; font-weight: 700; margin: 1.2rem 0 0.6rem 0;
+        padding-bottom: 0.35rem;
+        border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    .stMarkdown h2 {
+        font-size: 1.25rem; font-weight: 700; margin: 1rem 0 0.5rem 0;
+        color: rgba(250,250,250,0.94);
+    }
+    .stMarkdown h3 {
+        font-size: 1.08rem; font-weight: 600; margin: 0.8rem 0 0.4rem 0;
+        color: rgba(250,250,250,0.88);
+    }
+    .stMarkdown h4 {
+        font-size: 0.98rem; font-weight: 600; margin: 0.6rem 0 0.3rem 0;
+        color: rgba(250,250,250,0.82);
+    }
+    .stMarkdown h5 {
+        font-size: 0.92rem; font-weight: 600; margin: 0.5rem 0 0.25rem 0;
+        color: rgba(250,250,250,0.76);
+    }
+    .stMarkdown h6 {
+        font-size: 0.88rem; font-weight: 600; margin: 0.4rem 0 0.2rem 0;
+        color: rgba(250,250,250,0.70);
+    }
+    .stMarkdown p, .stMarkdown li {
+        font-size: 0.95rem; line-height: 1.6;
+    }
+
     /* 버튼(목차 항목 등) 컴팩트하게 */
     .stButton button { padding: 0.16rem 0.5rem; line-height: 1.25; min-height: 0; }
     .stButton button p {
@@ -933,8 +963,33 @@ def render_editor(backend: Backend, backend_key: str, relative: str,
         if not headings:
             st.caption("헤더 없음")
         else:
+            # 레벨별 시각 위계 (크기·굵기·색·들여쓰기·마커)
+            _LEVEL_STYLE = {
+                1: ("1.15rem", "700", "rgba(0,172,163,1.0)",   "■"),
+                2: ("1.02rem", "700", "rgba(250,250,250,0.95)", "▸"),
+                3: ("0.95rem", "600", "rgba(250,250,250,0.85)", "•"),
+                4: ("0.88rem", "500", "rgba(250,250,250,0.74)", "·"),
+                5: ("0.84rem", "400", "rgba(250,250,250,0.62)", "·"),
+                6: ("0.80rem", "400", "rgba(250,250,250,0.55)", "·"),
+            }
+            import html as _html
+            parts = []
             for lvl, text in headings:
-                st.markdown(f"{'  ' * (lvl - 1)}- {'#' * lvl} {text}")
+                size, weight, color, marker = _LEVEL_STYLE.get(
+                    lvl, _LEVEL_STYLE[6]
+                )
+                indent_rem = (lvl - 1) * 1.1
+                safe_text = _html.escape(text)
+                parts.append(
+                    f'<div style="'
+                    f'padding: 0.12rem 0 0.12rem {indent_rem}rem; '
+                    f'font-size: {size}; font-weight: {weight}; '
+                    f'color: {color}; line-height: 1.45;'
+                    f'">'
+                    f'<span style="opacity: 0.55; margin-right: 0.45rem;">'
+                    f'{marker}</span>{safe_text}</div>'
+                )
+            st.markdown("".join(parts), unsafe_allow_html=True)
 
     if tab_store is not None:
         with tab_store:
