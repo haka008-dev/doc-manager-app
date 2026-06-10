@@ -314,6 +314,35 @@ def disable_streamlit_shortcuts() -> None:
     components.html(_DISABLE_KEYS_JS, height=0)
 
 
+# ---------------- 화면 상단 스크롤 ----------------
+# 파트별 편집에서 목차(왼쪽)를 한참 내려가 클릭한 뒤, 편집기(오른쪽 상단)로
+# 자동 복귀하도록 메인 스크롤 컨테이너를 맨 위로 올림.
+_SCROLL_TOP_JS = """
+<script>
+(function() {
+    const pdoc = window.parent.document;
+    const candidates = [
+        pdoc.querySelector('[data-testid="stMain"]'),
+        pdoc.querySelector('section.main'),
+        pdoc.querySelector('[data-testid="stAppViewContainer"]'),
+        pdoc.scrollingElement,
+    ];
+    for (const el of candidates) {
+        if (el && typeof el.scrollTo === 'function') {
+            el.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+    }
+    window.parent.scrollTo({ top: 0, behavior: 'smooth' });
+})();
+</script>
+"""
+
+
+def scroll_to_top() -> None:
+    """메인 영역을 맨 위로 스크롤 (부드럽게)."""
+    components.html(_SCROLL_TOP_JS, height=0)
+
+
 # ---------------- secret/환경 변수 헬퍼 ----------------
 def _secret(key: str, default: str = "") -> str:
     """st.secrets에서 먼저 찾고 없으면 환경 변수에서. 둘 다 없으면 default."""
@@ -879,6 +908,7 @@ def render_editor(backend: Backend, backend_key: str, relative: str,
                             type="primary" if is_sel else "secondary",
                         ):
                             st.session_state[sel_key] = (hi, si)
+                            st.session_state["_scroll_top"] = True
                             st.rerun()
                 if shown == 0:
                     st.caption("검색 결과 없음")
@@ -897,6 +927,9 @@ def render_editor(backend: Backend, backend_key: str, relative: str,
                     if not valid or si >= len(h3_subs):
                         st.warning("문서 구조가 바뀌었어요. 목차에서 다시 선택하세요.")
                     else:
+                        # 목차 클릭 직후 — 편집기가 보이도록 화면 맨 위로
+                        if st.session_state.pop("_scroll_top", False):
+                            scroll_to_top()
                         h2 = h2_sections[hi]
                         sub = h3_subs[si]
                         st.markdown(f"#### {h2.title}  ›  {sub.title}")
