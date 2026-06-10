@@ -868,6 +868,75 @@ def render_editor(backend: Backend, backend_key: str, relative: str,
                         st.success(f"'{title}' 파트를 추가했습니다.")
                         st.rerun()
 
+            # ---- 새 단락 추가 (##) ----
+            with st.expander("새 단락 추가 (##)", expanded=False):
+                st.caption(
+                    "새 대분류(## 단락)를 만듭니다. 삽입 위치와 제목을 정하면 "
+                    "그 자리에 빈 단락이 생성되고, 이후 '새 파트 추가'로 "
+                    "하위 파트를 채울 수 있어요."
+                )
+                pos_options = [
+                    i for i, s in enumerate(h2_sections) if not s.is_intro
+                ] + [-1]  # -1 = 문서 맨 끝
+
+                def _pos_label(i):
+                    if i == -1:
+                        return "문서 맨 끝"
+                    return f"'{h2_sections[i].title}' 뒤"
+
+                pb1, pb2 = st.columns([2, 3])
+                with pb1:
+                    new_sec_pos = st.selectbox(
+                        "삽입 위치",
+                        pos_options,
+                        index=len(pos_options) - 1,
+                        format_func=_pos_label,
+                        key=f"newsec_pos::{relative}",
+                    )
+                with pb2:
+                    new_sec_title = st.text_input(
+                        "새 단락 제목",
+                        placeholder="예: 신규 프로모션 안내",
+                        key=f"newsec_title::{relative}",
+                    )
+                if st.button(
+                    "단락 생성", type="primary", key=f"newsec_btn::{relative}"
+                ):
+                    title = new_sec_title.strip()
+                    if not title:
+                        st.error("새 단락 제목을 입력하세요.")
+                    else:
+                        block = f"## {title}\n\n\n"
+                        parts = [s.full_text for s in h2_sections]
+
+                        def _pad(t: str) -> str:
+                            if not t.endswith("\n"):
+                                t += "\n"
+                            if not t.endswith("\n\n"):
+                                t += "\n"
+                            return t
+
+                        if new_sec_pos == -1:
+                            if parts:
+                                parts[-1] = _pad(parts[-1])
+                            parts.append(block)
+                            new_h2_index = len(h2_sections)
+                        else:
+                            parts[new_sec_pos] = _pad(parts[new_sec_pos])
+                            parts.insert(new_sec_pos + 1, block)
+                            new_h2_index = new_sec_pos + 1
+
+                        new_full = "".join(parts)
+                        _save_change(
+                            backend, relative, original, new_full,
+                            f"새 단락 추가: {title}", False, api_key, user,
+                        )
+                        st.session_state[sel_key] = (new_h2_index, 0)
+                        st.session_state.pop(f"buf::{relative}", None)
+                        st.session_state.pop(f"newsec_title::{relative}", None)
+                        st.success(f"'{title}' 단락을 추가했습니다.")
+                        st.rerun()
+
             col_toc, col_edit = st.columns([2, 5], gap="medium")
 
             with col_toc:
